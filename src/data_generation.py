@@ -34,6 +34,7 @@ NEGATIVE ACTIONS (BALANCED PENALTIES):
    - Reward: -2.0 (increased penalty from -1.0)
 """
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from typing import Dict, List, Tuple
@@ -153,18 +154,23 @@ class ProductCatalog:
                 'Toys': 25, 'Automotive': 150, 'Health': 40, 'Food': 10
             }
             base_price = base_prices.get(category_name, 50)
-            price = max(5, np.random.lognormal(np.log(base_price), 0.5))
-            
+
+            # Quality score (affects engagement)
+            if np.random.rand() < 0.1:  # 10% premium
+                quality = np.random.beta(5, 2)
+            else:
+                quality = np.random.beta(2, 5)
+
             # Popularity score (0-1)
-            popularity = np.random.beta(2, 5)  # Skewed towards lower popularity
-            
+            popularity = np.clip(np.random.beta(2, 5) + 0.3 * quality, 0, 1)
+
+            price = base_price * (0.5 + quality) * (0.8 + popularity)
+            price = max(5, np.random.lognormal(np.log(price), 0.3))
+
             # Style vector (normalized)
             style_vector = np.random.randn(self.style_dim)
             style_vector = style_vector / np.linalg.norm(style_vector)
-            
-            # Quality score (affects engagement)
-            quality = np.random.beta(3, 2)  # Skewed towards higher quality
-            
+
             product = {
                 'product_id': i,
                 'category_id': category_id,
@@ -232,25 +238,55 @@ class UserSimulator:
             age_normalized = (age - 18) / (70 - 18)
             
             # Budget affects price sensitivity
-            income_level = np.random.choice(['low', 'medium', 'high'], p=[0.3, 0.5, 0.2])
+            if age < 25:
+                income_level = np.random.choice(['low', 'medium', 'high'], p=[0.65, 0.3, 0.05])
+            elif age < 55:
+                income_level = np.random.choice(['low', 'medium', 'high'], p=[0.2, 0.6, 0.2])
+            else:
+                income_level = np.random.choice(['low', 'medium', 'high'], p=[0.4, 0.2, 0.4])
+
             budget_multiplier = {'low': 0.5, 'medium': 1.0, 'high': 2.0}[income_level]
             
             # Category preferences (some users prefer certain categories)
-            category_preferences = np.random.dirichlet(np.ones(self.n_categories) * 2)
-            
+            category_weights = np.ones(self.n_categories)
+
+            if age < 30:
+                category_weights[[0, 1, 4, 5]] *= 1.5
+
+            elif age < 50:
+                category_weights[[3, 4, 6, 8]] *= 1.5
+
+            else:
+                category_weights[[2, 3, 8]] *= 1.5
+
+            category_preferences = np.random.dirichlet(category_weights)
+
             # Style preferences (normalized vector)
             style_preferences = np.random.randn(self.style_dim)
             style_preferences = style_preferences / np.linalg.norm(style_preferences)
-            
-            # Price sensitivity (higher = more price sensitive)
-            price_sensitivity = np.random.beta(2, 3)
-            
-            # Quality sensitivity
-            quality_sensitivity = np.random.beta(3, 2)
-            
-            # Exploration tendency (how likely to try new things)
-            exploration_tendency = np.random.beta(2, 3)
-            
+
+            user_type = np.random.choice(['explorer', 'thrifty', 'premium', 'trend_follower'])
+            if user_type == 'explorer':
+                base_exploration = np.random.beta(5, 2)
+                base_price_sens = np.random.beta(2, 5)
+                base_quality_sens = np.random.beta(3, 2)
+            elif user_type == 'thrifty':
+                base_exploration = np.random.beta(2, 5)
+                base_price_sens = np.random.beta(5, 2)
+                base_quality_sens = np.random.beta(3, 2)
+            elif user_type == 'premium':
+                base_exploration = np.random.beta(3, 2)
+                base_price_sens = np.random.beta(2, 5)
+                base_quality_sens = np.random.beta(5, 2)
+            else:
+                base_exploration = np.random.beta(3, 2)
+                base_price_sens = np.random.beta(3, 2)
+                base_quality_sens = np.random.beta(3, 2)
+
+            price_sensitivity = np.clip(base_price_sens * (1.5 - budget_multiplier), 0, 1)
+            exploration_tendency = np.clip(base_exploration * (1.2 - age_normalized), 0, 1)
+            quality_sensitivity = np.clip(base_quality_sens * (0.5 + 0.5 * budget_multiplier), 0, 1)
+
             user = {
                 'user_id': i,
                 'age': age,
@@ -476,7 +512,7 @@ def generate_synthetic_data(n_products: int = 1000, n_users: int = 100,
     # Generate users
     simulator = UserSimulator(n_users, style_dim, n_categories)
     users_df = simulator.generate_users()
-    
+
     print(f"Generated {len(products_df)} products and {len(users_df)} users")
     print(f"Product categories: {catalog.category_names}")
     print(f"Style dimensions: {style_dim}")
