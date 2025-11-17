@@ -3,12 +3,18 @@ Service for managing ML experiments with configurable parameters.
 """
 
 import asyncio
+import random
 import uuid
 import time
 from datetime import datetime
-from typing import Dict, List, Any, Optional
-from api.core.learning_manager import GlobalLearningManager
+from typing import Dict, List, Optional
+
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+
+from api.core.learning_manager import learning_manager, ensure_learning_system_ready
 from api.services.batch_training_service import BatchTrainingService
+from api.models.database_models import Experiment, UserAction
 from api.models.schemas import (
     ExperimentConfiguration, ExperimentStatus, ExperimentResults, 
     StartExperimentResponse
@@ -19,73 +25,76 @@ from src.agents.factory import create_agent
 
 class ExperimentService:
     def __init__(self):
-        self.experiments: Dict[str, ExperimentStatus] = {}
-        self.experiment_results: Dict[str, ExperimentResults] = {}
-        self.batch_service = BatchTrainingService()
         self.running_experiments: Dict[str, asyncio.Task] = {}
     
-    async def create_experiment(self, config: ExperimentConfiguration) -> StartExperimentResponse:
+    async def create_experiment(self, db: AsyncSession, config: ExperimentConfiguration) -> StartExperimentResponse:
         """Create and start a new experiment."""
-        experiment_id = str(uuid.uuid4())[:8]
-        
-        # Create experiment status
-        experiment_status = ExperimentStatus(
-            experiment_id=experiment_id,
-            name=config.name,
-            status="pending",
-            progress=0.0,
-            configuration=config
-        )
-        
-        self.experiments[experiment_id] = experiment_status
-        
-        # Start experiment in background
-        task = asyncio.create_task(self._run_experiment(experiment_id, config))
-        self.running_experiments[experiment_id] = task
-        
-        estimated_duration = (config.n_users * config.actions_per_user * 0.1) / config.simulation_speed
-        
-        return StartExperimentResponse(
-            message=f"Experiment '{config.name}' started",
-            experiment_id=experiment_id,
-            status="running",
-            estimated_duration=estimated_duration
-        )
+        try:
+            is_ready = await ensure_learning_system_ready()
+            if not is_ready:
+                raise RuntimeError("Learning system is not ready and cannot be initialized")
+            
+            experiment_id = str(uuid.uuid4())[:8]
+            
+            # Create experiment in database
+            experiment = Experiment(
+                experiment_id=experiment_id,
+                name=config.name,
+                description=config.description,
+                status='pending',
+                progress=0.0,
+                configuration=config.model_dump(),
+                agent_type=config.agent_type,
+                agent_params=config.model_dump(),
+                start_time=datetime.now()
+            )
+            
+            db.add(experiment)
+            await db.commit()
+            
+            # Start experiment in background
+            task = asyncio.create_task(self._run_experiment(db, experiment_id, config))
+            self.running_experiments[experiment_id] = task
+            
+            estimated_duration = (config.n_users * config.actions_per_user * 0.1) / config.simulation_speed
+            
+            return StartExperimentResponse(
+                message=f"Experiment '{config.name}' started",
+                experiment_id=experiment_id,
+                status="running",
+                estimated_duration=estimated_duration
+            )
+        except Exception as e:
+            await db.rollback()
+            raise e
     
-    async def _run_experiment(self, experiment_id: str, config: ExperimentConfiguration):
+    async def _run_experiment(self, db: AsyncSession, experiment_id: str, config: ExperimentConfiguration):
         """Run the experiment in background."""
+        experiment = None
         try:
             # Update status to running
-            self.experiments[experiment_id].status = "running"
-            self.experiments[experiment_id].start_time = datetime.now().isoformat()
-            self.experiments[experiment_id].progress = 0.1
+            stmt = select(Experiment).where(Experiment.experiment_id == experiment_id)
+            result = await db.execute(stmt)
+            experiment = result.scalar_one_or_none()
+            
+            if experiment:
+                experiment.status = 'running'
+                experiment.progress = 0.1
+                await db.commit()
             
             start_time = time.time()
             
-            # Step 1: Initialize system with custom parameters
-            learning_manager = GlobalLearningManager()
-            catalog, simulator = generate_synthetic_data(
-                config.n_products, 
-                config.n_users
-            )
+            # Step 1: Ensure system is ready (должна быть готова после create_experiment)
+            if not learning_manager.is_ready:
+                print(f"❌ Learning system not ready for experiment {experiment_id}, aborting")
+                if experiment:
+                    experiment.status = 'failed'
+                    experiment.error_message = "Learning system not ready"
+                    experiment.end_time = datetime.now()
+                    await db.commit()
+                return
             
-            # Create custom agent
-            state_dim = len(simulator.get_user_state(0))
-            agent = create_agent(config.agent_type, config.n_products, state_dim)
-            
-            # Replace the global agent
-            learning_manager.catalog = catalog
-            learning_manager.simulator = simulator
-            learning_manager.agent = agent
-            learning_manager.is_ready = True
-            
-            self.experiments[experiment_id].progress = 0.3
-            
-            # Step 2: Pre-train agent
-            await self._pretrain_agent(learning_manager, experiment_id)
-            self.experiments[experiment_id].progress = 0.5
-            
-            # Step 3: Create users and simulate behavior
+            # Step 2: Create users and simulate behavior
             total_actions = 0
             total_rewards = 0.0
             action_counts = {}
@@ -95,48 +104,60 @@ class ExperimentService:
             users_created = 0
             batch_size = min(50, config.n_users)
             
+            batch_service = BatchTrainingService(db)  # Передаем db в конструктор
+            
             for batch_start in range(0, config.n_users, batch_size):
                 batch_end = min(batch_start + batch_size, config.n_users)
                 batch_count = batch_end - batch_start
                 
-                # Register users
-                bulk_result = await self.batch_service.bulk_register_users(batch_count)
-                registered_user_ids = bulk_result['user_ids']
+                # Register users through batch service
+                bulk_result = await batch_service.bulk_register_users(batch_count, experiment_id)
+                registered_user_ids = [int(uid) for uid in bulk_result['user_ids']]
                 users_created += batch_count
                 
-                # Simulate actions for this batch - use simulator user IDs (0-based)
-                for i, registered_user_id in enumerate(registered_user_ids):
-                    # Map to simulator user ID (within bounds)
-                    simulator_user_id = (batch_start + i) % learning_manager.simulator.n_users
+                # Simulate actions for each user
+                for user_id in registered_user_ids:
                     for action_num in range(config.actions_per_user):
                         try:
-                            # Get recommendations using registered user ID
-                            recommendations = learning_manager.get_recommendations(int(registered_user_id), 20)
+                            # Get recommendations using the learning manager
+                            recommendations = await learning_manager.get_recommendations(user_id, 20)
                             
                             if recommendations:
                                 # Choose random product
-                                import random
                                 product = random.choice(recommendations)
                                 product_id = product['product_id']
                                 
                                 # Get product features for realistic simulation
                                 product_features = learning_manager.catalog.get_product_features(product_id)
                                 
-                                # Use realistic user interaction simulation with simulator user ID
+                                # Simulate user interaction
+                                simulator_user_id = user_id % learning_manager.simulator.n_users
                                 interaction_result = learning_manager.simulator.simulate_user_interaction(
                                     simulator_user_id, product_features, action_num
                                 )
                                 
-                                # Get total reward from all occurred actions
+                                # Get total reward
                                 total_step_reward = interaction_result['total_reward']
                                 
-                                # Process each occurred action
+                                # Process each occurred action and save to database
                                 for occurred_action in interaction_result['occurred_actions']:
                                     action_name = occurred_action['action']
                                     action_reward = occurred_action['reward']
                                     
-                                    # Update agent with this specific action (use registered user ID for learning)
-                                    learning_manager.learn_from_action(int(registered_user_id), product_id, action_name, action_reward)
+                                    # Save action to database
+                                    user_action = UserAction(
+                                        user_id=user_id,
+                                        product_id=product_id,
+                                        action_type=action_name,
+                                        reward=action_reward,
+                                        session_time=action_num,
+                                        action_timestamp=datetime.now(),
+                                        experiment_id=experiment_id
+                                    )
+                                    db.add(user_action)
+                                    
+                                    # Update agent
+                                    learning_manager.learn_from_action(user_id, product_id, action_name, action_reward)
                                     
                                     # Track statistics
                                     action_counts[action_name] = action_counts.get(action_name, 0) + 1
@@ -154,14 +175,16 @@ class ExperimentService:
                                 await asyncio.sleep(0.01 / config.simulation_speed)
                         
                         except Exception as e:
-                            print(f"Error in experiment {experiment_id}: {e}")
+                            print(f"Error in experiment {experiment_id} for user {user_id}: {e}")
                             continue
                 
                 # Update progress
-                progress = 0.5 + 0.4 * (users_created / config.n_users)
-                self.experiments[experiment_id].progress = progress
+                if experiment:
+                    progress = 0.5 + 0.4 * (users_created / config.n_users)
+                    experiment.progress = progress
+                    await db.commit()
             
-            # Step 4: Calculate final results
+            # Step 4: Calculate final results and save to database
             completion_time = time.time() - start_time
             average_reward = total_rewards / max(total_actions, 1)
             
@@ -169,36 +192,34 @@ class ExperimentService:
             agent_performance = {
                 'agent_type': config.agent_type,
                 'total_episodes': len(learning_manager.learning_history),
-                'final_epsilon': getattr(agent, 'epsilon', 0.0) if hasattr(agent, 'epsilon') else 0.0,
-                'learning_rate': getattr(agent, 'learning_rate', 0.0) if hasattr(agent, 'learning_rate') else 0.0
+                'final_epsilon': getattr(learning_manager.agent, 'epsilon', 0.0) if hasattr(learning_manager.agent, 'epsilon') else 0.0,
+                'learning_rate': getattr(learning_manager.agent, 'learning_rate', 0.0) if hasattr(learning_manager.agent, 'learning_rate') else 0.0
             }
             
-            # Store results
-            results = ExperimentResults(
-                experiment_id=experiment_id,
-                total_users=users_created,
-                total_actions=total_actions,
-                total_rewards=total_rewards,
-                average_reward=average_reward,
-                action_distribution=action_counts,
-                learning_curve=learning_curve,
-                completion_time=completion_time,
-                agent_performance=agent_performance
-            )
-            
-            self.experiment_results[experiment_id] = results
-            
-            # Update final status
-            self.experiments[experiment_id].status = "completed"
-            self.experiments[experiment_id].progress = 1.0
-            self.experiments[experiment_id].end_time = datetime.now().isoformat()
-            self.experiments[experiment_id].results = results.dict()
-            
+            # Store results in database
+            if experiment:
+                experiment.status = 'completed'
+                experiment.progress = 1.0
+                experiment.end_time = datetime.now()
+                experiment.results = {
+                    'total_users': users_created,
+                    'total_actions': total_actions,
+                    'total_rewards': total_rewards,
+                    'average_reward': average_reward,
+                    'action_distribution': action_counts,
+                    'learning_curve': learning_curve,
+                    'completion_time': completion_time,
+                    'agent_performance': agent_performance
+                }
+                await db.commit()
+                
         except Exception as e:
             # Handle experiment failure
-            self.experiments[experiment_id].status = "failed"
-            self.experiments[experiment_id].error = str(e)
-            self.experiments[experiment_id].end_time = datetime.now().isoformat()
+            if experiment:
+                experiment.status = 'failed'
+                experiment.error_message = str(e)
+                experiment.end_time = datetime.now()
+                await db.commit()
             print(f"Experiment {experiment_id} failed: {e}")
         
         finally:
@@ -206,93 +227,125 @@ class ExperimentService:
             if experiment_id in self.running_experiments:
                 del self.running_experiments[experiment_id]
     
-    async def _pretrain_agent(self, learning_manager: GlobalLearningManager, experiment_id: str):
-        """Pre-train the agent with realistic episodes."""
-        episodes = 20
-        
-        for episode in range(episodes):
-            # Use random user for each episode
-            import random
-            user_id = random.randint(0, learning_manager.simulator.n_users - 1)
-            state = learning_manager.simulator.get_user_state(user_id)
-            episode_reward = 0
-            
-            for step in range(15):
-                action = learning_manager.agent.select_action(state)
-                
-                # Ensure action is valid
-                if action >= learning_manager.catalog.n_products:
-                    action = action % learning_manager.catalog.n_products
-                
-                # Get realistic reward using product features
-                product_features = learning_manager.catalog.get_product_features(action)
-                interaction_result = learning_manager.simulator.simulate_user_interaction(
-                    user_id, product_features, step
-                )
-                
-                # Use total reward from interaction
-                reward = interaction_result['total_reward']
-                next_state = learning_manager.simulator.get_user_state(user_id, step + 1)
-                done = step >= 14
-                
-                # Train agent
-                if hasattr(learning_manager.agent, 'update'):
-                    learning_manager.agent.update(state, action, reward, next_state, done)
-                
-                state = next_state
-                episode_reward += reward
-                
-                if done:
-                    break
-            
-            # Record learning
-            learning_manager.learning_history.append({
-                "episode": episode,
-                "reward": episode_reward,
-                "type": "pretrain",
-                "timestamp": datetime.now()
-            })
-    
-    def get_experiment_status(self, experiment_id: str) -> Optional[ExperimentStatus]:
+    async def get_experiment_status(self, db: AsyncSession, experiment_id: str) -> Optional[ExperimentStatus]:
         """Get experiment status by ID."""
-        return self.experiments.get(experiment_id)
+        try:
+            stmt = select(Experiment).where(Experiment.experiment_id == experiment_id)
+            result = await db.execute(stmt)
+            experiment = result.scalar_one_or_none()
+            
+            if not experiment:
+                return None
+                
+            return ExperimentStatus(
+                experiment_id=experiment.experiment_id,
+                name=experiment.name,
+                description=experiment.description,
+                status=experiment.status,
+                progress=experiment.progress,
+                current_agent=experiment.agent_type,
+                start_time=experiment.start_time,
+                end_time=experiment.end_time,
+                error=experiment.error_message,
+                created_at=experiment.created_at
+            )
+        except Exception as e:
+            raise ValueError(f"Failed to get experiment status: {str(e)}")
     
-    def get_experiment_results(self, experiment_id: str) -> Optional[ExperimentResults]:
+    async def get_experiment_results(self, db: AsyncSession, experiment_id: str) -> Optional[ExperimentResults]:
         """Get experiment results by ID."""
-        return self.experiment_results.get(experiment_id)
+        try:
+            stmt = select(Experiment).where(Experiment.experiment_id == experiment_id)
+            result = await db.execute(stmt)
+            experiment = result.scalar_one_or_none()
+            
+            if not experiment or not experiment.results:
+                return None
+            
+            results_data = experiment.results
+            return ExperimentResults(
+                experiment_id=experiment_id,
+                total_users=results_data.get('total_users', 0),
+                total_actions=results_data.get('total_actions', 0),
+                total_rewards=results_data.get('total_rewards', 0.0),
+                average_reward=results_data.get('average_reward', 0.0),
+                action_distribution=results_data.get('action_distribution', {}),
+                learning_curve=results_data.get('learning_curve', []),
+                completion_time=results_data.get('completion_time', 0.0),
+                agent_performance=results_data.get('agent_performance', {})
+            )
+        except Exception as e:
+            raise ValueError(f"Failed to get experiment results: {str(e)}")
     
-    def list_experiments(self) -> List[ExperimentStatus]:
+    async def list_experiments(self, db: AsyncSession) -> List[ExperimentStatus]:
         """List all experiments."""
-        return list(self.experiments.values())
+        try:
+            stmt = select(Experiment).order_by(Experiment.created_at.desc())
+            result = await db.execute(stmt)
+            experiments = result.scalars().all()
+
+            print(f"✅ Found {len(experiments)} experiments in database")
+            
+            return [
+                ExperimentStatus(
+                    experiment_id=exp.experiment_id,
+                    name=exp.name,
+                    description=exp.description,
+                    status=exp.status,
+                    progress=exp.progress,
+                    start_time=exp.start_time,
+                    end_time=exp.end_time,
+                    error=exp.error_message
+                )
+                for exp in experiments
+            ]
+        except Exception as e:
+            print(f"❌ Error in list_experiments service method: {e}")
+            import traceback
+            traceback.print_exc()
+            raise ValueError(f"Failed to list experiments: {str(e)}")
     
-    async def stop_experiment(self, experiment_id: str) -> bool:
+    async def stop_experiment(self, db: AsyncSession, experiment_id: str) -> bool:
         """Stop a running experiment."""
-        if experiment_id in self.running_experiments:
-            task = self.running_experiments[experiment_id]
-            task.cancel()
-            
-            # Update status
-            if experiment_id in self.experiments:
-                self.experiments[experiment_id].status = "cancelled"
-                self.experiments[experiment_id].end_time = datetime.now().isoformat()
-            
-            return True
-        return False
+        try:
+            if experiment_id in self.running_experiments:
+                task = self.running_experiments[experiment_id]
+                task.cancel()
+                
+                # Update status in database
+                stmt = select(Experiment).where(Experiment.experiment_id == experiment_id)
+                result = await db.execute(stmt)
+                experiment = result.scalar_one_or_none()
+                
+                if experiment:
+                    experiment.status = 'cancelled'
+                    experiment.end_time = datetime.now()
+                    await db.commit()
+                
+                del self.running_experiments[experiment_id]
+                return True
+            return False
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to stop experiment: {str(e)}")
     
-    def delete_experiment(self, experiment_id: str) -> bool:
+    async def delete_experiment(self, db: AsyncSession, experiment_id: str) -> bool:
         """Delete an experiment and its results."""
-        # Stop if running
-        if experiment_id in self.running_experiments:
-            asyncio.create_task(self.stop_experiment(experiment_id))
-        
-        # Remove from storage
-        removed = False
-        if experiment_id in self.experiments:
-            del self.experiments[experiment_id]
-            removed = True
-        
-        if experiment_id in self.experiment_results:
-            del self.experiment_results[experiment_id]
-            removed = True
-        
-        return removed
+        try:
+            # Stop if running
+            if experiment_id in self.running_experiments:
+                await self.stop_experiment(db, experiment_id)
+            
+            # Delete from database
+            stmt = select(Experiment).where(Experiment.experiment_id == experiment_id)
+            result = await db.execute(stmt)
+            experiment = result.scalar_one_or_none()
+            
+            if experiment:
+                await db.delete(experiment)
+                await db.commit()
+                return True
+            return False
+        except Exception as e:
+            await db.rollback()
+            raise ValueError(f"Failed to delete experiment: {str(e)}")

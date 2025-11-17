@@ -1,35 +1,55 @@
 """
 FastAPI server for E-commerce RL Recommendation System.
-Reorganized with proper folder structure.
 """
 
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from contextlib import asynccontextmanager
 
-# Import new organized API components
 from api.routes.recommendations import router as recommendations_router
 from api.routes.users import router as users_router
 from api.routes.cart import router as cart_router
 from api.routes.batch_training import router as batch_training_router
 from api.routes.experiments import router as experiments_router
 
+from api.core.database import init_db
+from api.core.learning_manager import learning_manager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    print("🚀 Starting API...")
+    
+    print("🗄️ Initializing database...")
+    await init_db()
+    
+    try:
+        await learning_manager.initialize_system()
+    except Exception as e:
+        print(f"❌ Learning system initialization error: {e}")
+    
+    yield
+    
+    print("🛑 Shutting down API...")
+    await learning_manager.shutdown()
+
 # FastAPI app
 app = FastAPI(
     title="E-commerce RL Recommendation API",
     description="REST API for reinforcement learning recommendation system",
-    version="2.0.0"
+    version="2.0.0",
+    lifespan=lifespan
 )
 
-# CORS middleware for frontend integration
+# CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # В продакшене указать конкретные домены
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Include routers
+# Routers
 app.include_router(recommendations_router)
 app.include_router(users_router)
 app.include_router(cart_router)
@@ -38,25 +58,36 @@ app.include_router(experiments_router)
 
 @app.get("/")
 async def root():
-    """Health check endpoint."""
+    """Health check."""
     return {
         "message": "E-commerce RL Recommendation API",
         "version": "2.0.0",
-        "status": "running",
-        "features": [
-            "Smart recommendations with DQN agent",
-            "Continuous learning from user actions",
-            "User registration with dataset medians",
-            "Shopping cart and order placement",
-            "Batch training with bulk user creation",
-            "User behavior simulation for ML training",
-            "Real-time training statistics monitoring",
-            "ML experiment management with configurable parameters",
-            "Multi-agent comparison experiments",
-            "Real-time experiment monitoring and results visualization"
-        ]
+        "status": "running"
     }
 
+@app.get("/health")
+async def health():
+    """Health check with learning system status."""
+    learning_stats = learning_manager.get_learning_stats()
+    return {
+        "status": "healthy",
+        "learning_system": learning_stats,
+        "learning_system_ready": learning_manager.is_ready
+    }
+
+@app.post("/system/reinitialize")
+async def reinitialize_system():
+    """Reinitialize the learning system manually"""
+    try:
+        await learning_manager.shutdown()
+        await learning_manager.initialize_system()
+        return {
+            "success": True,
+            "ready": learning_manager.is_ready,
+            "message": "System reinitialized successfully"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Reinitialization failed: {str(e)}")
 
 if __name__ == "__main__":
     import uvicorn

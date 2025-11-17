@@ -13,7 +13,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 
 # Конфигурация
-API_BASE_URL = "http://localhost:8000"
+API_BASE_URL = "http://api:8000"
 
 # Настройка страницы
 st.set_page_config(

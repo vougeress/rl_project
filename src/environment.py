@@ -3,10 +3,10 @@ E-commerce recommendation environment for reinforcement learning.
 """
 
 import numpy as np
-import gym
-from gym import spaces
+import gymnasium as gym
 from typing import Dict, List, Tuple, Optional
 from .data_generation import ProductCatalog, UserSimulator
+from gymnasium import spaces
 
 
 class ECommerceEnv(gym.Env):

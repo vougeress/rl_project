@@ -2,9 +2,13 @@
 Pydantic models for API requests and responses.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Dict, Optional, Any
 from datetime import datetime
+
+
+class BaseSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
 
 
 class ExperimentConfig(BaseModel):
@@ -16,75 +20,63 @@ class ExperimentConfig(BaseModel):
     agent_params: Dict[str, Dict] = {}
 
 
-class ExperimentStatus(BaseModel):
+class ExperimentBase(BaseSchema):
     experiment_id: str
+    name: str
+    description: Optional[str] = None
+    status: str
+    progress: float
+    agent_type: str
+    configuration: Optional[Dict[str, Any]] = None
+    agent_params: Optional[Dict[str, Any]] = None
+    results: Optional[Dict[str, Any]] = None
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    error_message: Optional[str] = None
+
+
+class ExperimentCreate(BaseSchema):
+    name: str
+    description: Optional[str] = None
+    configuration: Dict[str, Any]
+    agent_type: str
+    agent_params: Dict[str, Any]
+
+
+class ExperimentStatus(BaseSchema):
+    experiment_id: str
+    name: str
+    description: Optional[str] = None
     status: str  # "running", "completed", "failed"
     progress: float  # 0.0 to 1.0
     current_agent: Optional[str] = None
     start_time: datetime
     end_time: Optional[datetime] = None
+    created_at: Optional[datetime] = None
     error: Optional[str] = None
 
 
-class RecommendationRequest(BaseModel):
+class UserBase(BaseSchema):
     user_id: int
-    session_time: int = 0
-    agent_type: str = "dqn"
-    experiment_id: Optional[str] = None
-
-
-class UserActionResult(BaseModel):
-    action: str
-    reward: float
-    description: str
-
-
-class InteractionResult(BaseModel):
-    occurred_actions: List[UserActionResult]
-    total_reward: float
-    action_probabilities: Dict[str, float]
-
-
-class ProductInfo(BaseModel):
-    product_id: int
-    category: str
-    price: float
-    popularity: float
-    quality: float
-
-
-class UserInfo(BaseModel):
-    user_id: int
+    name: str
     age: int
     income_level: str
     price_sensitivity: float
     quality_sensitivity: float
     exploration_tendency: float
+    budget_multiplier: float
+    category_preferences: Optional[Dict[str, Any]] = None
+    style_preferences: Optional[Dict[str, Any]] = None
+    state_vector: Optional[Dict[str, Any]] = None
+    registered_at: datetime
 
 
-class UserRegistration(BaseModel):
-    name: str
-    age: int
+class UserRegistration(BaseSchema):
+    name: str = Field(..., min_length=1, max_length=100)
+    age: int = Field(..., ge=16, le=100)
 
 
-class UserAction(BaseModel):
-    user_id: int
-    product_id: int
-    action: str  # "like", "dislike", "report", "add_to_cart"
-
-
-class CartItem(BaseModel):
-    product_id: int
-    quantity: int = 1
-
-
-class RecommendationsResponse(BaseModel):
-    products: List[ProductInfo]
-    user_id: int
-    total_count: int
-
-
-class UserRegistrationResponse(BaseModel):
+class UserRegistrationResponse(BaseSchema):
     user_id: int
     name: str
     age: int
@@ -93,7 +85,79 @@ class UserRegistrationResponse(BaseModel):
     message: str
 
 
-class ProductActionResponse(BaseModel):
+class UserInfo(BaseSchema):
+    user_id: int
+    name: str
+    age: int
+    income_level: str
+    price_sensitivity: float
+    quality_sensitivity: float
+    exploration_tendency: float
+
+
+class ProductBase(BaseSchema):
+    product_id: int
+    category_id: int
+    category_name: str
+    price: float
+    popularity: float
+    quality: float
+    style_vector: Optional[Dict[str, Any]] = None
+    created_at: datetime
+
+
+class ProductInfo(BaseSchema):
+    product_id: int
+    category_name: str
+    price: float
+    popularity: float
+    quality: float
+
+
+class RecommendationRequest(BaseSchema):
+    user_id: int
+    session_time: int = 0
+    agent_type: str = "dqn"
+    experiment_id: Optional[str] = None
+
+
+class RecommendationsResponse(BaseSchema):
+    products: List[ProductInfo]
+    user_id: int
+    total_count: int
+
+
+class UserActionResult(BaseSchema):
+    action: str
+    reward: float
+    description: str
+
+
+class UserActionBase(BaseSchema):
+    user_id: int
+    product_id: Optional[int] = None
+    action_type: str
+    reward: float
+    session_time: int = 0
+    style_match: Optional[float] = None
+    category_match: Optional[float] = None
+    price_match: Optional[float] = None
+    quality_bonus: Optional[float] = None
+    popularity_bonus: Optional[float] = None
+    action_probability: Optional[float] = None
+    session_id: Optional[str] = None
+    experiment_id: Optional[str] = None
+
+
+class UserActionCreate(BaseSchema):
+    user_id: int
+    product_id: Optional[int] = None
+    action_type: str = Field(..., pattern="^(view|like|add_to_cart|purchase|share|dislike|close_immediately|report|remove_from_cart)$")
+    session_id: Optional[str] = None
+    experiment_id: Optional[str] = None
+
+
+class ProductActionResponse(BaseSchema):
     user_id: int
     product_id: int
     product_info: ProductInfo
@@ -103,7 +167,26 @@ class ProductActionResponse(BaseModel):
     timestamp: datetime
 
 
-class CartResponse(BaseModel):
+class InteractionResult(BaseSchema):
+    occurred_actions: List[UserActionResult]
+    total_reward: float
+    action_probabilities: Dict[str, float]
+
+
+class CartItemBase(BaseSchema):
+    cart_item_id: int
+    user_id: int
+    product_id: int
+    quantity: int
+    added_at: datetime
+
+
+class CartItemCreate(BaseSchema):
+    product_id: int
+    quantity: int = Field(1, ge=1)
+
+
+class CartResponse(BaseSchema):
     user_id: int
     cart_items: List[Dict[str, Any]]
     total_items: int
@@ -111,34 +194,71 @@ class CartResponse(BaseModel):
     total_price: float
 
 
-class OrderResponse(BaseModel):
+class OrderBase(BaseSchema):
+    order_id: int
+    user_id: int
+    total_price: float
+    status: str
+    order_date: datetime
+    completed_at: Optional[datetime] = None
+    items: Optional[Dict[str, Any]] = None
+
+
+class OrderResponse(BaseSchema):
     message: str
     order: Dict[str, Any]
 
 
+class UserSessionBase(BaseSchema):
+    session_id: str
+    user_id: int
+    start_time: datetime
+    end_time: Optional[datetime] = None
+    session_length: int
+    total_reward: float
+    actions_count: int
+    experiment_id: Optional[str] = None
+
+
+class UserSessionCreate(BaseSchema):
+    user_id: int
+    experiment_id: Optional[str] = None
+
+class UserSessionResponse(BaseSchema):
+    session_id: str
+    user_id: int
+    start_time: datetime
+    end_time: Optional[datetime] = None
+    session_length: int
+    total_reward: float
+    actions_count: int
+    experiment_id: Optional[str] = None
+    is_active: bool = Field(..., description="Whether the session is still active")
+
+
 # Batch training schemas
-class BulkUserRegistration(BaseModel):
+class BulkUserRegistration(BaseSchema):
     count: int = Field(..., ge=1, le=1000, description="Number of users to register (1-1000)")
     
-class BulkUserResponse(BaseModel):
+class BulkUserResponse(BaseSchema):
     message: str
     users_created: int
     user_ids: List[str]
 
-class BatchAction(BaseModel):
+class BatchAction(BaseSchema):
     user_id: int
     product_id: int
     action: str = Field(..., pattern="^(like|dislike|add_to_cart|report)$")
 
-class BulkActionsRequest(BaseModel):
+class BulkActionsRequest(BaseSchema):
     actions: List[BatchAction] = Field(..., max_items=10000)
     
-class BulkActionsResponse(BaseModel):
+class BulkActionsResponse(BaseSchema):
     message: str
     actions_processed: int
     learning_updates: int
     
-class TrainingStatus(BaseModel):
+class TrainingStatus(BaseSchema):
     total_users: int
     total_actions: int
     learning_episodes: int
@@ -146,12 +266,12 @@ class TrainingStatus(BaseModel):
     average_reward: float
     last_update: str
     
-class SimulationRequest(BaseModel):
+class SimulationRequest(BaseSchema):
     num_users: int = Field(..., ge=1, le=100, description="Number of users to simulate")
     actions_per_user: int = Field(..., ge=1, le=100, description="Actions per user")
     simulation_speed: float = Field(1.0, ge=0.1, le=10.0, description="Speed multiplier")
     
-class SimulationResponse(BaseModel):
+class SimulationResponse(BaseSchema):
     message: str
     simulation_id: str
     users_created: int
@@ -159,7 +279,7 @@ class SimulationResponse(BaseModel):
     estimated_duration: float
 
 # Experiment management schemas
-class ExperimentConfiguration(BaseModel):
+class ExperimentConfiguration(BaseSchema):
     name: str = Field(..., description="Experiment name")
     description: str = Field("", description="Experiment description")
     n_products: int = Field(500, ge=100, le=2000, description="Number of products")
@@ -167,19 +287,9 @@ class ExperimentConfiguration(BaseModel):
     actions_per_user: int = Field(20, ge=1, le=100, description="Actions per user")
     simulation_speed: float = Field(2.0, ge=0.1, le=10.0, description="Simulation speed")
     agent_type: str = Field("dqn", pattern="^(dqn|epsilon_greedy|linucb|random)$")
-    
-class ExperimentStatus(BaseModel):
-    experiment_id: str
-    name: str
-    status: str  # "pending", "running", "completed", "failed"
-    progress: float  # 0.0 to 1.0
-    start_time: Optional[str] = None
-    end_time: Optional[str] = None
-    configuration: ExperimentConfiguration
-    results: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
 
-class ExperimentResults(BaseModel):
+
+class ExperimentResults(BaseSchema):
     experiment_id: str
     total_users: int
     total_actions: int
@@ -190,7 +300,7 @@ class ExperimentResults(BaseModel):
     completion_time: float
     agent_performance: Dict[str, Any]
 
-class StartExperimentResponse(BaseModel):
+class StartExperimentResponse(BaseSchema):
     message: str
     experiment_id: str
     status: str

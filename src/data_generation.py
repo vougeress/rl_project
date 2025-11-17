@@ -29,9 +29,13 @@ NEGATIVE ACTIONS (BALANCED PENALTIES):
    - Probability: (1 - base_engagement) × 0.2 (maximum 25%)
    - Reward: -0.5 (increased penalty from -0.2)
 
-2. REPORT_SPAM (Жалоба)
+2. REPORT (Жалоба)
    - Probability: (1 - base_engagement) × (1 - quality) × 0.001 (maximum 0.5%)
    - Reward: -2.0 (increased penalty from -1.0)
+
+3. REMOVE_FROM_CART (Удалить из корзины)
+   - Probability: (1 - base_engagement) × 0.2 (maximum 25%)
+   - Reward: -0.5 (increased penalty from -0.2)
 """
 
 import numpy as np
@@ -98,11 +102,18 @@ class UserActionTypes:
         description="User disliked the product"
     )
     
-    REPORT_SPAM = ActionSpec(
-        name="report_spam",
+    REPORT = ActionSpec(
+        name="report",
         max_probability=0.005,  # Increased from 0.1% to 0.5%
         reward=-2.0,  # Increased penalty from -1.0
         description="User reported product as spam"
+    )
+
+    REMOVE_FROM_CART = ActionSpec(
+        name="remove_from_cart",
+        max_probability=0.25,  # Increased from 8% to 25%
+        reward=-0.5,  # Increased penalty from -0.2
+        description="User removed from cart"
     )
     
     @classmethod
@@ -110,7 +121,7 @@ class UserActionTypes:
         """Get all action specifications."""
         return [
             cls.VIEW, cls.LIKE, cls.ADD_TO_CART, cls.PURCHASE,
-            cls.SHARE, cls.DISLIKE, cls.REPORT_SPAM
+            cls.SHARE, cls.DISLIKE, cls.REPORT
         ]
     
     @classmethod
@@ -121,7 +132,7 @@ class UserActionTypes:
     @classmethod
     def get_negative_actions(cls):
         """Get negative action specifications."""
-        return [cls.DISLIKE, cls.REPORT_SPAM]
+        return [cls.DISLIKE, cls.REPORT]
 
 
 class ProductCatalog:
@@ -399,9 +410,9 @@ class UserSimulator:
             'description': 'Пользователю не понравился товар'
         }
         
-        # 7. REPORT_SPAM (пожаловаться) - очень редко, умеренный штраф
+        # 7. REPORT (пожаловаться) - очень редко, умеренный штраф
         spam_prob = (1 - base_engagement) * (1 - quality) * 0.001 + np.random.normal(0, 0.0005)
-        actions['report_spam'] = {
+        actions['report'] = {
             'probability': np.clip(spam_prob, 0, 0.002),  # Максимум 0.2%
             'reward': -1.0,  # Умеренный штраф
             'description': 'Пользователь пожаловался на товар'

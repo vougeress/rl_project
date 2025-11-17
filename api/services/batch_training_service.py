@@ -6,16 +6,20 @@ import asyncio
 import random
 import uuid
 from datetime import datetime
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
+
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from api.core.learning_manager import GlobalLearningManager
 from api.services.user_service import UserService
 from api.services.recommendation_service import RecommendationService
 from api.models.schemas import UserRegistration
-from src.data_generation import generate_synthetic_data, ProductCatalog, UserSimulator
+from src.data_generation import generate_synthetic_data
 
 
 class BatchTrainingService:
-    def __init__(self):
+    def __init__(self, db: AsyncSession):
+        self.db = db
         self.learning_manager = GlobalLearningManager()
         self.user_service = UserService()
         self.recommendation_service = RecommendationService()
@@ -28,69 +32,85 @@ class BatchTrainingService:
             'start_time': None
         }
     
-    async def bulk_register_users(self, count: int) -> Dict[str, Any]:
+    async def bulk_register_users(self, count: int, experiment_id: Optional[str] = None) -> Dict[str, Any]:
         """Register multiple users with random profiles."""
         user_ids = []
         
-        for _ in range(count):
-            # Generate random user data
-            name = f"User_{random.randint(1000, 9999)}"
-            age = random.randint(18, 65)
+        try:
+            for _ in range(count):
+                # Generate random user data
+                name = f"User_{random.randint(1000, 9999)}"
+                age = random.randint(16, 65)
+                
+                # Create UserRegistration object
+                user_registration = UserRegistration(name=name, age=age)
+                
+                # Register user
+                user_data = await self.user_service.register_user(self.db, user_registration, experiment_id)
+                user_ids.append(str(user_data.user_id))
             
-            # Create UserRegistration object
-            user_registration = UserRegistration(name=name, age=age)
+            await self.db.commit()
+        
+            self.simulation_stats['total_users'] += count
             
-            # Register user
-            user_data = self.user_service.register_user(user_registration)
-            user_ids.append(str(user_data.user_id))
+            return {
+                'message': f'Successfully registered {count} users',
+                'users_created': count,
+                'user_ids': user_ids
+            }
         
-        self.simulation_stats['total_users'] += count
-        
-        return {
-            'message': f'Successfully registered {count} users',
-            'users_created': count,
-            'user_ids': user_ids
-        }
+        except Exception as e:
+            await self.db.rollback()
+            raise e
     
     async def process_bulk_actions(self, actions: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Process multiple user actions for training."""
         processed_count = 0
         learning_updates = 0
         
-        for action_data in actions:
-            try:
-                user_id = action_data['user_id']
-                product_id = action_data['product_id']
-                action = action_data['action']
-                
-                # Process the action through recommendation service
-                result = await self.recommendation_service.process_user_action(
-                    user_id, product_id, action
-                )
-                
-                processed_count += 1
-                learning_updates += 1
-                
-            except Exception as e:
-                print(f"Error processing action: {e}")
-                continue
+        try:
+            for action_data in actions:
+                try:
+                    user_id = action_data['user_id']
+                    product_id = action_data['product_id']
+                    action = action_data['action']
+                    experiment_id = action_data.get('experiment_id')
+                    
+                    # Process the action through recommendation service
+                    result = await self.recommendation_service.process_user_action(
+                        self.db, user_id, product_id, action, experiment_id
+                    )
+                    
+                    processed_count += 1
+                    learning_updates += 1
+                    
+                except Exception as e:
+                    print(f"Error processing action: {e}")
+                    continue
+            
+            await self.db.commit()
+            
+            self.simulation_stats['total_actions'] += processed_count
+            self.simulation_stats['learning_episodes'] += learning_updates
+            
+            return {
+                'message': f'Processed {processed_count} actions',
+                'actions_processed': processed_count,
+                'learning_updates': learning_updates
+            }
         
-        self.simulation_stats['total_actions'] += processed_count
-        self.simulation_stats['learning_episodes'] += learning_updates
-        
-        return {
-            'message': f'Processed {processed_count} actions',
-            'actions_processed': processed_count,
-            'learning_updates': learning_updates
-        }
+        except Exception as e:
+            await self.db.rollback()
+            raise e
     
     async def simulate_user_behavior(self, num_users: int, actions_per_user: int, 
-                                   simulation_speed: float = 1.0) -> Dict[str, Any]:
+                                   simulation_speed: float = 1.0,
+                                   experiment_id: Optional[str] = None) -> Dict[str, Any]:
         """Simulate realistic user behavior for training."""
         simulation_id = str(uuid.uuid4())[:8]
         
         # First, register users
-        bulk_users = await self.bulk_register_users(num_users)
+        bulk_users = await self.bulk_register_users(num_users, experiment_id)
         user_ids = [int(uid) for uid in bulk_users['user_ids']]
         
         # Initialize data if not exists
@@ -100,65 +120,76 @@ class BatchTrainingService:
         total_actions = 0
         actions_batch = []
         
-        # Simulate actions for each user
-        for user_id in user_ids:
-            for _ in range(actions_per_user):
-                # Get recommendations for user
-                try:
-                    recommendations = await self.recommendation_service.get_recommendations(user_id)
-                    
-                    if recommendations['products']:
-                        # Choose a random product from recommendations
-                        product = random.choice(recommendations['products'])
-                        product_id = product['product_id']
+        try:
+            # Simulate actions for each user
+            for user_id in user_ids:
+                for _ in range(actions_per_user):
+                    # Get recommendations for user
+                    try:
+                        recommendations = await self.recommendation_service.get_recommendations(self.db, user_id)
                         
-                        # Simulate realistic action probabilities
-                        action_weights = {
-                            'like': 0.4,
-                            'dislike': 0.2,
-                            'add_to_cart': 0.3,
-                            'report': 0.1
-                        }
-                        
-                        action = random.choices(
-                            list(action_weights.keys()),
-                            weights=list(action_weights.values())
-                        )[0]
-                        
-                        actions_batch.append({
-                            'user_id': user_id,
-                            'product_id': product_id,
-                            'action': action
-                        })
-                        total_actions += 1
-                        
-                        # Process in batches to avoid memory issues
-                        if len(actions_batch) >= 100:
-                            await self.process_bulk_actions(actions_batch)
-                            actions_batch = []
+                        if recommendations.products:
+                            # Choose a random product from recommendations
+                            product = random.choice(recommendations.products)
+                            product_id = product.product_id
                             
-                            # Simulate delay based on speed
-                            await asyncio.sleep(0.1 / simulation_speed)
-                
-                except Exception as e:
-                    print(f"Error in simulation for user {user_id}: {e}")
-                    continue
+                            # Simulate realistic action probabilities
+                            action_weights = {
+                                'view': 0.3,
+                                'like': 0.2,
+                                'dislike': 0.1,
+                                'add_to_cart': 0.2,
+                                'purchase': 0.1,
+                                'report': 0.05,
+                                'close_immediately': 0.05
+                            }
+                            
+                            action = random.choices(
+                                list(action_weights.keys()),
+                                weights=list(action_weights.values())
+                            )[0]
+                            
+                            actions_batch.append({
+                                'user_id': user_id,
+                                'product_id': product_id,
+                                'action': action,
+                                'experiment_id': experiment_id
+                            })
+                            total_actions += 1
+                            
+                            # Process in batches to avoid memory issues
+                            if len(actions_batch) >= 100:
+                                await self.process_bulk_actions(actions_batch)
+                                actions_batch = []
+                                
+                                # Simulate delay based on speed
+                                await asyncio.sleep(0.1 / simulation_speed)
+                    
+                    except Exception as e:
+                        print(f"Error in simulation for user {user_id}: {e}")
+                        continue
+            
+            # Process remaining actions
+            if actions_batch:
+                await self.process_bulk_actions(actions_batch)
+            
+            await self.db.commit()
+            
+            estimated_duration = (total_actions * 0.1) / simulation_speed
+            
+            return {
+                'message': f'Simulation {simulation_id} completed',
+                'simulation_id': simulation_id,
+                'users_created': num_users,
+                'total_actions': total_actions,
+                'estimated_duration': estimated_duration
+            }
         
-        # Process remaining actions
-        if actions_batch:
-            await self.process_bulk_actions(actions_batch)
-        
-        estimated_duration = (total_actions * 0.1) / simulation_speed
-        
-        return {
-            'message': f'Simulation {simulation_id} completed',
-            'simulation_id': simulation_id,
-            'users_created': num_users,
-            'total_actions': total_actions,
-            'estimated_duration': estimated_duration
-        }
+        except Exception as e:
+            await self.db.rollback()
+            raise e
     
-    def get_training_status(self) -> Dict[str, Any]:
+    async def get_training_status(self) -> Dict[str, Any]:
         """Get current training statistics."""
         try:
             # Get learning stats from the manager
