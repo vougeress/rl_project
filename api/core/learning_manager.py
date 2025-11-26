@@ -90,6 +90,8 @@ class GlobalLearningManager:
                     
                     product = Product(
                         product_id=int(product_id),
+                        product_name=row['product_name'],
+                        name_format=row.get('name_format'),
                         category_id=category_mapping.get(row['category_name'], 0),
                         category_name=row['category_name'],
                         price=float(row['price']),

@@ -29,7 +29,7 @@ class RecommendationService:
                 recommendations_data = await self._get_fallback_recommendations(db, limit)
             else:
                 # Get recommendations from global learning manager
-                recommendations_data = learning_manager.get_recommendations(user_id, limit)
+                recommendations_data = await learning_manager.get_recommendations(user_id, limit)
 
             if not recommendations_data:
                 recommendations_data = await self._get_fallback_recommendations(
@@ -40,6 +40,8 @@ class RecommendationService:
             for product_info in recommendations_data:
                 recommendations.append(ProductInfo(
                     product_id=product_info['product_id'],
+                    product_name=product_info.get('product_name', f"Product {product_info['product_id']}"),
+                    name_format=product_info.get('name_format'),
                     category_name=product_info['category_name'],
                     price=product_info['price'],
                     popularity=product_info['popularity'],
@@ -67,6 +69,8 @@ class RecommendationService:
 
             return {
                 'product_id': product.product_id,
+                'product_name': product.product_name,
+                'name_format': product.name_format,
                 'category_id': product.category_id,
                 'category_name': product.category_name,
                 'price': product.price,
@@ -89,6 +93,8 @@ class RecommendationService:
             for product in products:
                 recommendations.append({
                     'product_id': product.product_id,
+                    'product_name': product.product_name,
+                    'name_format': product.name_format,
                     'category_name': product.category_name,
                     'price': product.price,
                     'popularity': product.popularity,

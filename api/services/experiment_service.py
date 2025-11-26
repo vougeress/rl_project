@@ -291,10 +291,15 @@ class ExperimentService:
                     experiment_id=exp.experiment_id,
                     name=exp.name,
                     description=exp.description,
+                    agent_type=exp.agent_type,
                     status=exp.status,
                     progress=exp.progress,
+                    configuration=exp.configuration,
+                    agent_params=exp.agent_params,
+                    results=exp.results,
                     start_time=exp.start_time,
                     end_time=exp.end_time,
+                    created_at=exp.created_at,
                     error=exp.error_message
                 )
                 for exp in experiments

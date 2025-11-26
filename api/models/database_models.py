@@ -33,6 +33,8 @@ class Product(Base):
     __tablename__ = "products"
     
     product_id = Column(Integer, primary_key=True, index=True)
+    product_name = Column(String(200), nullable=False)
+    name_format = Column(String(200), nullable=True)
     category_id = Column(Integer, nullable=False)
     category_name = Column(String(50), nullable=False)
     price = Column(Float, nullable=False)
@@ -47,6 +49,7 @@ class Product(Base):
         CheckConstraint('price > 0', name='price_check'),
         CheckConstraint('popularity >= 0 AND popularity <= 1', name='popularity_check'),
         CheckConstraint('quality >= 0 AND quality <= 1', name='quality_check'),
+        Index('idx_products_name', 'product_name'),
         Index('idx_products_category', 'category_name'),
         Index('idx_products_price', 'price'),
         Index('idx_products_popularity', 'popularity'),
@@ -114,7 +117,7 @@ class UserAction(Base):
     experiment_id = Column(String(20), ForeignKey('experiments.experiment_id'))
     
     __table_args__ = (
-        CheckConstraint("action_type IN ('view', 'like', 'add_to_cart', 'purchase', 'share', 'dislike', 'close_immediately', 'report', 'remove_from_cart')", name='action_type_check'),
+        CheckConstraint("action_type IN ('view', 'like', 'add_to_cart', 'purchase', 'share', 'dislike', 'close_immediately', 'report', 'report_spam', 'remove_from_cart')", name='action_type_check'),
         Index('idx_user_actions_user_id', 'user_id'),
         Index('idx_user_actions_timestamp', 'action_timestamp'),
         Index('idx_user_actions_session', 'session_id'),

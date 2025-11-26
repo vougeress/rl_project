@@ -47,9 +47,13 @@ class ExperimentStatus(BaseSchema):
     experiment_id: str
     name: str
     description: Optional[str] = None
+    agent_type: Optional[str] = None
     status: str  # "running", "completed", "failed"
     progress: float  # 0.0 to 1.0
     current_agent: Optional[str] = None
+    configuration: Optional[Dict[str, Any]] = None
+    agent_params: Optional[Dict[str, Any]] = None
+    results: Optional[Dict[str, Any]] = None
     start_time: datetime
     end_time: Optional[datetime] = None
     created_at: Optional[datetime] = None
@@ -97,6 +101,8 @@ class UserInfo(BaseSchema):
 
 class ProductBase(BaseSchema):
     product_id: int
+    product_name: str
+    name_format: Optional[str] = None
     category_id: int
     category_name: str
     price: float
@@ -108,6 +114,8 @@ class ProductBase(BaseSchema):
 
 class ProductInfo(BaseSchema):
     product_id: int
+    product_name: str
+    name_format: Optional[str] = None
     category_name: str
     price: float
     popularity: float
@@ -152,7 +160,10 @@ class UserActionBase(BaseSchema):
 class UserActionCreate(BaseSchema):
     user_id: int
     product_id: Optional[int] = None
-    action_type: str = Field(..., pattern="^(view|like|add_to_cart|purchase|share|dislike|close_immediately|report|remove_from_cart)$")
+    action_type: str = Field(
+        ...,
+        pattern="^(view|like|add_to_cart|purchase|share|dislike|close_immediately|report|report_spam|remove_from_cart)$"
+    )
     session_id: Optional[str] = None
     experiment_id: Optional[str] = None
 
