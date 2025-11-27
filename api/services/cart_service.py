@@ -64,7 +64,7 @@ class CartService:
             
             # Update learning system
             if learning_manager.is_ready:
-                learning_manager.update_user_preferences(user_id, cart_data.product_id, 'add_to_cart')
+                await learning_manager.update_user_preferences(db, user_id, cart_data.product_id, 'add_to_cart')
             
             await db.commit()
             
@@ -233,7 +233,7 @@ class CartService:
                 
                 # Update learning system
                 if learning_manager.is_ready:
-                    learning_manager.update_user_preferences(user_id, cart_item.product_id, 'purchase')
+                    await learning_manager.update_user_preferences(db, user_id, cart_item.product_id, 'purchase')
             
             # Clear cart after order
             for cart_item in cart_items:

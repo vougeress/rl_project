@@ -91,6 +91,7 @@ class UserSession(Base):
     total_reward = Column(Float, default=0.0)
     actions_count = Column(Integer, default=0)
     experiment_id = Column(String(20), ForeignKey('experiments.experiment_id'))
+    session_number = Column(Integer, default=1)
 
     __table_args__ = (
         Index('idx_sessions_user', 'user_id'),

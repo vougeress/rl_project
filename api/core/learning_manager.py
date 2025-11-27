@@ -8,7 +8,7 @@ from datetime import datetime
 from collections import defaultdict
 from datetime import datetime, timedelta
 from sqlalchemy import select
-from typing import Dict, List
+from typing import Dict, List, Optional, Any
 
 from api.models.database_models import Product, User, UserAction
 from src.data_generation import generate_synthetic_data
@@ -205,7 +205,14 @@ class GlobalLearningManager:
                 for i in range(limit)
             ]
     
-    def learn_from_action(self, user_id: int, product_id: int, action: str, reward: float):
+    def learn_from_action(
+        self,
+        user_id: int,
+        product_id: int,
+        action: str,
+        reward: float,
+        session_context: Optional[Dict[str, Any]] = None
+    ):
         """Update agent based on user action."""
         if not self.is_ready:
             print("⚠️ Learning system not ready, skipping learning update")
@@ -218,20 +225,27 @@ class GlobalLearningManager:
             
             # Create next state (simulate progression)
             next_state = self.simulator.get_user_state(simulator_user_id, 1)
+            reward_signal = reward
+            if session_context:
+                session_actions = session_context.get('current_session_actions', 0)
+                avg_reward = session_context.get('average_reward', reward)
+                intensity_bonus = min(session_actions, 50) / 50 * 0.1
+                reward_signal = reward * (1 + intensity_bonus) + 0.05 * avg_reward
             
             # Update agent
             if hasattr(self.agent, 'update'):
-                self.agent.update(user_state, product_id, reward, next_state, False)
+                self.agent.update(user_state, product_id, reward_signal, next_state, False)
                 
                 # Record learning
                 self.learning_history.append({
                     "episode": len(self.learning_history),
-                    "reward": reward,
+                    "reward": reward_signal,
                     "type": "user_action",
                     "action": action,
                     "user_id": user_id,
                     "product_id": product_id,
-                    "timestamp": datetime.now()
+                    "timestamp": datetime.now(),
+                    "session": session_context or {}
                 })
                 
                 # print(f"🧠 Agent learned from '{action}' action (reward: {reward})")

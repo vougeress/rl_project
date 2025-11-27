@@ -87,6 +87,9 @@ class UserRegistrationResponse(BaseSchema):
     income_level: str
     profile_completed_with_medians: Dict[str, float]
     message: str
+    session_id: str
+    session_started_at: datetime
+    session_number: int
 
 
 class UserInfo(BaseSchema):
@@ -229,6 +232,7 @@ class UserSessionBase(BaseSchema):
     total_reward: float
     actions_count: int
     experiment_id: Optional[str] = None
+    session_number: int
 
 
 class UserSessionCreate(BaseSchema):
@@ -245,16 +249,25 @@ class UserSessionResponse(BaseSchema):
     actions_count: int
     experiment_id: Optional[str] = None
     is_active: bool = Field(..., description="Whether the session is still active")
+    session_number: int
 
 
 # Batch training schemas
 class BulkUserRegistration(BaseSchema):
     count: int = Field(..., ge=1, le=1000, description="Number of users to register (1-1000)")
     
+class BulkUserSessionInfo(BaseSchema):
+    user_id: int
+    session_id: str
+    session_number: int
+    started_at: datetime
+
+
 class BulkUserResponse(BaseSchema):
     message: str
     users_created: int
     user_ids: List[str]
+    user_sessions: List[BulkUserSessionInfo]
 
 class BatchAction(BaseSchema):
     user_id: int
@@ -310,6 +323,10 @@ class ExperimentResults(BaseSchema):
     learning_curve: List[float]
     completion_time: float
     agent_performance: Dict[str, Any]
+    reward_distribution: Dict[str, Dict[str, float]]
+    conversion_metrics: Dict[str, float]
+    session_metrics: Dict[str, Any]
+    reward_timeline: List[Dict[str, float]]
 
 class StartExperimentResponse(BaseSchema):
     message: str

@@ -180,6 +180,10 @@ def create_comprehensive_comparison_charts(experiments):
     comparison_data = []
     learning_curves = {}
     action_distributions = {}
+    reward_distribution_rows = []
+    conversion_records = []
+    session_records = []
+    reward_timelines = {}
     
     for exp in experiments:
         results = exp['results']
@@ -206,6 +210,41 @@ def create_comprehensive_comparison_charts(experiments):
         # Распределение действий
         if results.get('action_distribution'):
             action_distributions[agent_type] = results['action_distribution']
+        
+        if results.get('reward_distribution'):
+            for action_name, stats in results['reward_distribution'].items():
+                reward_distribution_rows.append({
+                    'Агент': agent_type.upper(),
+                    'Действие': action_name,
+                    'Доля действий': stats.get('percentage', 0) * 100,
+                    'Средняя награда': stats.get('avg_reward', 0),
+                    'Количество': stats.get('count', 0)
+                })
+        
+        if results.get('conversion_metrics'):
+            conversion_metrics = results['conversion_metrics']
+            conversion_records.append({
+                'Агент': agent_type.upper(),
+                'Просмотры': conversion_metrics.get('view_rate', 0),
+                'Вовлеченность': conversion_metrics.get('interaction_rate', 0),
+                'Добавление в корзину': conversion_metrics.get('cart_rate', 0),
+                'Покупки': conversion_metrics.get('purchase_rate', 0),
+                'Негативные действия': conversion_metrics.get('negative_feedback_rate', 0)
+            })
+        
+        if results.get('session_metrics'):
+            session_metrics = results['session_metrics']
+            session_records.append({
+                'Агент': agent_type.upper(),
+                'Сессий': session_metrics.get('sessions', 0),
+                'Действий/сессию': session_metrics.get('avg_actions_per_session', 0),
+                'Награда/сессию': session_metrics.get('avg_reward_per_session', 0.0),
+                'Конфиг. действий/польз.': session_metrics.get('configured_actions_per_user', 0),
+                'Время/сессию (с)': session_metrics.get('completion_time_per_session', 0.0)
+            })
+        
+        if results.get('reward_timeline'):
+            reward_timelines[agent_type] = results['reward_timeline']
     
     df = pd.DataFrame(comparison_data)
     
@@ -364,6 +403,103 @@ def create_comprehensive_comparison_charts(experiments):
                 )
                 fig_pie.update_layout(height=400)
                 st.plotly_chart(fig_pie, config={'displayModeBar': False})
+    
+    # 8. Конверсионные метрики
+    if conversion_records:
+        st.markdown("### 🔁 Конверсионные метрики")
+        conv_df = pd.DataFrame(conversion_records)
+        display_df = conv_df.copy()
+        for col in display_df.columns:
+            if col != 'Агент':
+                display_df[col] = (display_df[col] * 100).round(2)
+        st.dataframe(display_df.rename(columns=lambda c: c if c == 'Агент' else f"{c} (%)"))
+        
+        conv_melt = conv_df.melt(id_vars='Агент', var_name='Метрика', value_name='Значение')
+        conv_melt['Значение'] = conv_melt['Значение'] * 100
+        fig_conv = px.bar(
+            conv_melt,
+            x='Метрика',
+            y='Значение',
+            color='Агент',
+            barmode='group',
+            title="Конверсии на каждом шаге, %"
+        )
+        fig_conv.update_layout(height=450)
+        st.plotly_chart(fig_conv, config={'displayModeBar': False})
+    
+    # 9. Метрики сессий
+    if session_records:
+        st.markdown("### 👥 Метрики пользовательских сессий")
+        session_df = pd.DataFrame(session_records)
+        session_df['Действий/сессию'] = session_df['Действий/сессию'].round(2)
+        session_df['Награда/сессию'] = session_df['Награда/сессию'].round(2)
+        session_df['Время/сессию (с)'] = session_df['Время/сессию (с)'].round(2)
+        st.dataframe(session_df)
+        
+        fig_sessions = px.bar(
+            session_df,
+            x='Агент',
+            y='Действий/сессию',
+            color='Агент',
+            title="Среднее количество действий в сессии",
+            text='Действий/сессию'
+        )
+        fig_sessions.update_traces(texttemplate='%{text:.1f}', textposition='outside')
+        fig_sessions.update_layout(height=400, showlegend=False)
+        st.plotly_chart(fig_sessions, config={'displayModeBar': False})
+    
+    # 10. Распределение наград по действиям
+    if reward_distribution_rows:
+        st.markdown("### 🎯 Награды по действиям")
+        dist_df = pd.DataFrame(reward_distribution_rows)
+        
+        share_df = dist_df.copy()
+        fig_dist = px.bar(
+            share_df,
+            x='Доля действий',
+            y='Агент',
+            color='Действие',
+            orientation='h',
+            barmode='stack',
+            title="Доля действий по типам, %"
+        )
+        fig_dist.update_layout(height=500)
+        st.plotly_chart(fig_dist, config={'displayModeBar': False})
+        
+        fig_reward = px.bar(
+            dist_df,
+            x='Действие',
+            y='Средняя награда',
+            color='Агент',
+            barmode='group',
+            title="Средняя награда по действиям"
+        )
+        fig_reward.update_layout(height=450)
+        st.plotly_chart(fig_reward, config={'displayModeBar': False})
+    
+    # 11. Таймлайн наград
+    if reward_timelines:
+        st.markdown("### ⏱️ Динамика награды в ходе эксперимента")
+        fig_timeline = go.Figure()
+        colors = ['#FFB347', '#6A0572', '#2E86AB', '#4CAF50']
+        for i, (agent, timeline) in enumerate(reward_timelines.items()):
+            if not timeline:
+                continue
+            fig_timeline.add_trace(go.Scatter(
+                x=[point.get('actions', 0) for point in timeline],
+                y=[point.get('avg_reward', 0) for point in timeline],
+                mode='lines',
+                name=agent.upper(),
+                line=dict(color=colors[i % len(colors)], width=3)
+            ))
+        fig_timeline.update_layout(
+            title="Изменение средней награды по мере выполнения действий",
+            xaxis_title="Количество действий",
+            yaxis_title="Средняя награда",
+            height=500,
+            hovermode='x unified'
+        )
+        st.plotly_chart(fig_timeline, config={'displayModeBar': False})
 
 def show_experiment_launcher():
     """Интерфейс запуска эксперимента сравнения агентов."""

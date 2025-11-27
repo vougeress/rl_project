@@ -35,6 +35,7 @@ class BatchTrainingService:
     async def bulk_register_users(self, count: int, experiment_id: Optional[str] = None) -> Dict[str, Any]:
         """Register multiple users with random profiles."""
         user_ids = []
+        user_sessions = []
         
         try:
             for _ in range(count):
@@ -48,6 +49,12 @@ class BatchTrainingService:
                 # Register user
                 user_data = await self.user_service.register_user(self.db, user_registration, experiment_id)
                 user_ids.append(str(user_data.user_id))
+                user_sessions.append({
+                    'user_id': user_data.user_id,
+                    'session_id': user_data.session_id,
+                    'session_number': user_data.session_number,
+                    'started_at': user_data.session_started_at
+                })
             
             await self.db.commit()
         
@@ -56,7 +63,8 @@ class BatchTrainingService:
             return {
                 'message': f'Successfully registered {count} users',
                 'users_created': count,
-                'user_ids': user_ids
+                'user_ids': user_ids,
+                'user_sessions': user_sessions
             }
         
         except Exception as e:

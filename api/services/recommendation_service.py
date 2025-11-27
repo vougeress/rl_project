@@ -146,10 +146,25 @@ class RecommendationService:
 
             db.add(user_action)
 
-            await user_service.update_session_on_action(db, actual_session_id, reward)
+            await user_service.update_session_on_action(db, actual_session_id, reward, auto_commit=False)
+            session_state = await user_service.update_user_state_vector(
+                db, user_id, actual_session_id, action, reward
+            )
 
             if learning_manager.is_ready and action not in ['add_to_cart', 'remove_from_cart', 'purchase']:
-                learning_manager.update_user_preferences(user_id, product_id, action)
+                session_context = {
+                    'current_session_actions': session_state.get('current_session_actions', 0),
+                    'current_session_reward': session_state.get('current_session_reward', 0.0),
+                    'average_reward': session_state.get('average_reward', reward)
+                }
+                learning_manager.learn_from_action(
+                    user_id,
+                    product_id,
+                    action,
+                    reward,
+                    session_context=session_context
+                )
+                await learning_manager.update_user_preferences(db, user_id, product_id, action)
             
             await db.commit()
 

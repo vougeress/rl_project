@@ -7,13 +7,15 @@ import random
 import uuid
 import time
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
+from collections import defaultdict
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from api.core.learning_manager import learning_manager, ensure_learning_system_ready
 from api.services.batch_training_service import BatchTrainingService
+from api.services.user_service import UserService
 from api.models.database_models import Experiment, UserAction
 from api.models.schemas import (
     ExperimentConfiguration, ExperimentStatus, ExperimentResults, 
@@ -26,6 +28,7 @@ from src.agents.factory import create_agent
 class ExperimentService:
     def __init__(self):
         self.running_experiments: Dict[str, asyncio.Task] = {}
+        self.user_service = UserService()
     
     async def create_experiment(self, db: AsyncSession, config: ExperimentConfiguration) -> StartExperimentResponse:
         """Create and start a new experiment."""
@@ -98,13 +101,16 @@ class ExperimentService:
             total_actions = 0
             total_rewards = 0.0
             action_counts = {}
+            action_stats = defaultdict(lambda: {"count": 0, "total_reward": 0.0})
             learning_curve = []
+            reward_timeline = []
             
             # Create users in batches
             users_created = 0
             batch_size = min(50, config.n_users)
             
             batch_service = BatchTrainingService(db)  # Передаем db в конструктор
+            user_session_cache: Dict[int, Dict[str, Any]] = {}
             
             for batch_start in range(0, config.n_users, batch_size):
                 batch_end = min(batch_start + batch_size, config.n_users)
@@ -114,9 +120,25 @@ class ExperimentService:
                 bulk_result = await batch_service.bulk_register_users(batch_count, experiment_id)
                 registered_user_ids = [int(uid) for uid in bulk_result['user_ids']]
                 users_created += batch_count
+                for session_info in bulk_result.get('user_sessions', []):
+                    user_session_cache[int(session_info['user_id'])] = {
+                        'session_id': session_info['session_id'],
+                        'session_number': session_info.get('session_number', 1)
+                    }
                 
                 # Simulate actions for each user
                 for user_id in registered_user_ids:
+                    session_meta = user_session_cache.get(user_id)
+                    if not session_meta:
+                        session = await self.user_service.get_user_session(db, user_id)
+                        if not session:
+                            session = await self.user_service.start_new_session(db, user_id, experiment_id)
+                        session_meta = {
+                            'session_id': session.session_id,
+                            'session_number': session.session_number
+                        }
+                        user_session_cache[user_id] = session_meta
+                    session_id = session_meta['session_id']
                     for action_num in range(config.actions_per_user):
                         try:
                             # Get recommendations using the learning manager
@@ -152,15 +174,37 @@ class ExperimentService:
                                         reward=action_reward,
                                         session_time=action_num,
                                         action_timestamp=datetime.now(),
-                                        experiment_id=experiment_id
+                                        experiment_id=experiment_id,
+                                        session_id=session_id
                                     )
                                     db.add(user_action)
                                     
+                                    await self.user_service.update_session_on_action(
+                                        db, session_id, action_reward, auto_commit=False
+                                    )
+                                    session_state = await self.user_service.update_user_state_vector(
+                                        db, user_id, session_id, action_name, action_reward
+                                    )
+                                    
+                                    session_context = {
+                                        'current_session_actions': session_state.get('current_session_actions', 0),
+                                        'current_session_reward': session_state.get('current_session_reward', 0.0),
+                                        'average_reward': session_state.get('average_reward', action_reward)
+                                    }
+                                    
                                     # Update agent
-                                    learning_manager.learn_from_action(user_id, product_id, action_name, action_reward)
+                                    learning_manager.learn_from_action(
+                                        user_id,
+                                        product_id,
+                                        action_name,
+                                        action_reward,
+                                        session_context=session_context
+                                    )
                                     
                                     # Track statistics
                                     action_counts[action_name] = action_counts.get(action_name, 0) + 1
+                                    action_stats[action_name]["count"] += 1
+                                    action_stats[action_name]["total_reward"] += action_reward
                                 
                                 # Track overall statistics
                                 total_actions += 1
@@ -170,6 +214,10 @@ class ExperimentService:
                                 if total_actions % 100 == 0:
                                     avg_reward = total_rewards / total_actions
                                     learning_curve.append(avg_reward)
+                                    reward_timeline.append({
+                                        "actions": total_actions,
+                                        "avg_reward": avg_reward
+                                    })
                                 
                                 # Small delay for simulation speed
                                 await asyncio.sleep(0.01 / config.simulation_speed)
@@ -177,6 +225,13 @@ class ExperimentService:
                         except Exception as e:
                             print(f"Error in experiment {experiment_id} for user {user_id}: {e}")
                             continue
+                
+                    await self.user_service.end_session(db, session_id, auto_commit=False)
+                    new_session = await self.user_service.start_new_session(db, user_id, experiment_id)
+                    user_session_cache[user_id] = {
+                        'session_id': new_session.session_id,
+                        'session_number': new_session.session_number
+                    }
                 
                 # Update progress
                 if experiment:
@@ -187,6 +242,44 @@ class ExperimentService:
             # Step 4: Calculate final results and save to database
             completion_time = time.time() - start_time
             average_reward = total_rewards / max(total_actions, 1)
+            
+            reward_distribution = {}
+            for action_name, stats in action_stats.items():
+                count = stats["count"]
+                reward_distribution[action_name] = {
+                    "count": count,
+                    "avg_reward": stats["total_reward"] / max(count, 1),
+                    "percentage": count / max(total_actions, 1)
+                }
+            if total_actions > 0:
+                reward_timeline.append({
+                    "actions": total_actions,
+                    "avg_reward": average_reward
+                })
+            
+            def get_rate(action: str) -> float:
+                return action_counts.get(action, 0) / max(total_actions, 1)
+            
+            conversion_metrics = {
+                "view_rate": get_rate('view'),
+                "interaction_rate": (action_counts.get('like', 0) + action_counts.get('share', 0)) / max(total_actions, 1),
+                "cart_rate": get_rate('add_to_cart'),
+                "purchase_rate": get_rate('purchase'),
+                "negative_feedback_rate": (
+                    action_counts.get('dislike', 0) +
+                    action_counts.get('report', 0) +
+                    action_counts.get('report_spam', 0) +
+                    action_counts.get('close_immediately', 0)
+                ) / max(total_actions, 1)
+            }
+            
+            session_metrics = {
+                "sessions": users_created,
+                "avg_actions_per_session": total_actions / max(users_created, 1),
+                "avg_reward_per_session": total_rewards / max(users_created, 1),
+                "configured_actions_per_user": config.actions_per_user,
+                "completion_time_per_session": completion_time / max(users_created, 1)
+            }
             
             # Agent performance metrics
             agent_performance = {
@@ -209,7 +302,11 @@ class ExperimentService:
                     'action_distribution': action_counts,
                     'learning_curve': learning_curve,
                     'completion_time': completion_time,
-                    'agent_performance': agent_performance
+                    'agent_performance': agent_performance,
+                    'reward_distribution': reward_distribution,
+                    'conversion_metrics': conversion_metrics,
+                    'session_metrics': session_metrics,
+                    'reward_timeline': reward_timeline
                 }
                 await db.commit()
                 
@@ -272,7 +369,11 @@ class ExperimentService:
                 action_distribution=results_data.get('action_distribution', {}),
                 learning_curve=results_data.get('learning_curve', []),
                 completion_time=results_data.get('completion_time', 0.0),
-                agent_performance=results_data.get('agent_performance', {})
+                agent_performance=results_data.get('agent_performance', {}),
+                reward_distribution=results_data.get('reward_distribution', {}),
+                conversion_metrics=results_data.get('conversion_metrics', {}),
+                session_metrics=results_data.get('session_metrics', {}),
+                reward_timeline=results_data.get('reward_timeline', [])
             )
         except Exception as e:
             raise ValueError(f"Failed to get experiment results: {str(e)}")
