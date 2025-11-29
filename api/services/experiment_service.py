@@ -6,6 +6,7 @@ import asyncio
 import random
 import uuid
 import time
+import numpy as np
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from collections import defaultdict
@@ -105,6 +106,10 @@ class ExperimentService:
             learning_curve = []
             reward_timeline = []
             
+            # Sliding window for current performance tracking (last 1000 actions)
+            recent_rewards = []
+            window_size = 1000
+            
             # Create users in batches
             users_created = 0
             batch_size = min(50, config.n_users)
@@ -142,7 +147,7 @@ class ExperimentService:
                     for action_num in range(config.actions_per_user):
                         try:
                             # Get recommendations using the learning manager
-                            recommendations = await learning_manager.get_recommendations(user_id, 20)
+                            recommendations = await learning_manager.get_recommendations(user_id, 20, db=db)
                             
                             if recommendations:
                                 # Choose random product
@@ -193,12 +198,13 @@ class ExperimentService:
                                     }
                                     
                                     # Update agent
-                                    learning_manager.learn_from_action(
+                                    await learning_manager.learn_from_action(
                                         user_id,
                                         product_id,
                                         action_name,
                                         action_reward,
-                                        session_context=session_context
+                                        session_context=session_context,
+                                        db=db
                                     )
                                     
                                     # Track statistics
@@ -210,13 +216,32 @@ class ExperimentService:
                                 total_actions += 1
                                 total_rewards += total_step_reward
                                 
-                                # Record learning curve
+                                # Update sliding window for current performance
+                                recent_rewards.append(total_step_reward)
+                                if len(recent_rewards) > window_size:
+                                    recent_rewards.pop(0)  # Remove oldest reward
+                                
+                                # Record learning curve with both cumulative and sliding window metrics
                                 if total_actions % 100 == 0:
-                                    avg_reward = total_rewards / total_actions
-                                    learning_curve.append(avg_reward)
+                                    # Cumulative average (for overall progress)
+                                    cumulative_avg = total_rewards / total_actions
+                                    
+                                    # Sliding window average (for current performance)
+                                    if len(recent_rewards) > 0:
+                                        current_avg = sum(recent_rewards) / len(recent_rewards)
+                                    else:
+                                        current_avg = cumulative_avg
+                                    
+                                    learning_curve.append({
+                                        "cumulative_avg": cumulative_avg,
+                                        "current_avg": current_avg,
+                                        "window_size": len(recent_rewards)
+                                    })
                                     reward_timeline.append({
                                         "actions": total_actions,
-                                        "avg_reward": avg_reward
+                                        "cumulative_avg_reward": cumulative_avg,
+                                        "current_avg_reward": current_avg,  # This shows actual learning progress
+                                        "window_size": len(recent_rewards)
                                     })
                                 
                                 # Small delay for simulation speed
@@ -241,7 +266,13 @@ class ExperimentService:
             
             # Step 4: Calculate final results and save to database
             completion_time = time.time() - start_time
-            average_reward = total_rewards / max(total_actions, 1)
+            cumulative_average_reward = total_rewards / max(total_actions, 1)
+            
+            # Calculate current performance (sliding window average)
+            if len(recent_rewards) > 0:
+                current_average_reward = sum(recent_rewards) / len(recent_rewards)
+            else:
+                current_average_reward = cumulative_average_reward
             
             reward_distribution = {}
             for action_name, stats in action_stats.items():
@@ -254,7 +285,9 @@ class ExperimentService:
             if total_actions > 0:
                 reward_timeline.append({
                     "actions": total_actions,
-                    "avg_reward": average_reward
+                    "cumulative_avg_reward": cumulative_average_reward,
+                    "current_avg_reward": current_average_reward,
+                    "window_size": len(recent_rewards)
                 })
             
             def get_rate(action: str) -> float:
@@ -298,7 +331,8 @@ class ExperimentService:
                     'total_users': users_created,
                     'total_actions': total_actions,
                     'total_rewards': total_rewards,
-                    'average_reward': average_reward,
+                    'cumulative_average_reward': cumulative_average_reward,  # Overall average
+                    'current_average_reward': current_average_reward,  # Recent performance (sliding window)
                     'action_distribution': action_counts,
                     'learning_curve': learning_curve,
                     'completion_time': completion_time,
@@ -306,7 +340,8 @@ class ExperimentService:
                     'reward_distribution': reward_distribution,
                     'conversion_metrics': conversion_metrics,
                     'session_metrics': session_metrics,
-                    'reward_timeline': reward_timeline
+                    'reward_timeline': reward_timeline,
+                    'performance_improvement': current_average_reward - (learning_curve[0]['current_avg'] if learning_curve else cumulative_average_reward) if learning_curve else 0.0
                 }
                 await db.commit()
                 
@@ -360,12 +395,18 @@ class ExperimentService:
                 return None
             
             results_data = experiment.results
+            # Backward compatibility: use cumulative_average_reward if available, else average_reward
+            avg_reward = results_data.get('cumulative_average_reward') or results_data.get('average_reward', 0.0)
+            
             return ExperimentResults(
                 experiment_id=experiment_id,
                 total_users=results_data.get('total_users', 0),
                 total_actions=results_data.get('total_actions', 0),
                 total_rewards=results_data.get('total_rewards', 0.0),
-                average_reward=results_data.get('average_reward', 0.0),
+                average_reward=avg_reward,  # Backward compatibility
+                cumulative_average_reward=results_data.get('cumulative_average_reward'),
+                current_average_reward=results_data.get('current_average_reward'),
+                performance_improvement=results_data.get('performance_improvement'),
                 action_distribution=results_data.get('action_distribution', {}),
                 learning_curve=results_data.get('learning_curve', []),
                 completion_time=results_data.get('completion_time', 0.0),

@@ -1,37 +1,43 @@
 """
 Data generation module for creating synthetic product catalog and user profiles.
 
+IMPROVEMENTS FOR BETTER LEARNING:
+1. Rewards now scale with base_engagement - better signal for learning
+2. Reduced time drift (0.002 vs 0.01) - more stable preferences for learning
+3. Increased action probabilities - more positive feedback for good recommendations
+4. Better base_engagement range (0.15-0.95 vs 0.1-0.9) - more differentiation
+
 User Action Types for Simulation:
 
-POSITIVE ACTIONS (BALANCED REWARDS):
+POSITIVE ACTIONS (ENGAGEMENT-DEPENDENT REWARDS):
 1. VIEW (Просмотр)
    - Probability: 100% (always occurs)
-   - Reward: 0.3 (increased from 0.1)
+   - Reward: 0.1 + 0.2 × base_engagement (0.13-0.29) - scales with quality
 
 2. LIKE (Добавить в избранное)
-   - Probability: base_engagement × 0.4 (maximum 50%)
-   - Reward: 1.0 (increased from 0.5)
+   - Probability: base_engagement × 0.5 (maximum 60%)
+   - Reward: 0.8 + 0.4 × base_engagement (0.86-1.16) - scales with quality
 
 3. ADD_TO_CART (Добавить в корзину)
-   - Probability: (base_engagement - 0.2) × 0.3 (maximum 25%)
-   - Reward: 3.0 (increased from 2.0)
+   - Probability: (base_engagement - 0.15) × 0.4 (maximum 30%)
+   - Reward: 2.5 + 1.0 × base_engagement (2.65-3.45) - scales with quality
 
 4. PURCHASE (Покупка)
-   - Probability: (base_engagement - 0.3) × 0.2 × price_match (maximum 15%)
-   - Reward: 8.0 (decreased from 10.0 for balance)
+   - Probability: (base_engagement - 0.25) × 0.25 × price_match (maximum 20%)
+   - Reward: 7.0 + 2.0 × base_engagement (7.3-8.9) - scales with quality
 
 5. SHARE (Поделиться)
-   - Probability: quality × popularity × base_engagement × 0.1 (maximum 8%)
-   - Reward: 4.0 (increased from 3.0)
+   - Probability: quality × popularity × base_engagement × 0.12 (maximum 10%)
+   - Reward: 3.5 + 1.0 × base_engagement (3.65-4.45) - scales with quality
 
-NEGATIVE ACTIONS (BALANCED PENALTIES):
+NEGATIVE ACTIONS (ENGAGEMENT-DEPENDENT PENALTIES):
 1. DISLIKE (Не понравилось)
-   - Probability: (1 - base_engagement) × 0.2 (maximum 25%)
-   - Reward: -0.5 (increased penalty from -0.2)
+   - Probability: (1 - base_engagement) × 0.15 (maximum 25%)
+   - Reward: -0.2 - 0.2 × (1 - base_engagement) (-0.2 to -0.37)
 
 2. REPORT_SPAM (Жалоба)
-   - Probability: (1 - base_engagement) × (1 - quality) × 0.001 (maximum 0.5%)
-   - Reward: -2.0 (increased penalty from -1.0)
+   - Probability: (1 - base_engagement) × (1 - quality) × 0.001 (maximum 0.2%)
+   - Reward: -1.0 (moderate penalty)
 """
 
 import matplotlib.pyplot as plt
@@ -476,10 +482,14 @@ class UserSimulator:
         category_prefs = np.array([user[f'category_pref_{j}'] for j in range(self.n_categories)])
 
         # Add time-based drift (preferences evolve slowly)
-        drift_factor = 0.01 * session_time
-        style_drift = np.random.randn(self.style_dim) * drift_factor
-        style_prefs = style_prefs + style_drift
-        style_prefs = style_prefs / np.linalg.norm(style_prefs)  # Renormalize
+        # Используем нелинейный дрейф - быстрее в начале, медленнее потом
+        # Это позволяет агентам быстрее адаптироваться к изменениям
+        if session_time > 0:
+            # Логарифмический дрейф - замедляется со временем
+            drift_factor = 0.001 * np.log1p(session_time)  # Логарифмический рост вместо линейного
+            style_drift = np.random.randn(self.style_dim) * drift_factor
+            style_prefs = style_prefs + style_drift
+            style_prefs = style_prefs / np.linalg.norm(style_prefs)  # Renormalize
 
         # Combine all features into state vector
         state = np.concatenate([
@@ -533,65 +543,64 @@ class UserSimulator:
 
         # Base engagement score - улучшенная формула для лучшей дифференциации
         base_engagement = (
-            0.3 * max(0, style_match) +  # Только положительные совпадения стиля
-            0.25 * category_match +
-            0.2 * max(0, 1 - price_penalty) +
-            0.15 * quality_bonus +
-            0.1 * popularity_bonus
+            0.35 * max(0, style_match) +
+            0.30 * category_match +
+            0.20 * max(0, 1 - price_penalty) +
+            0.10 * quality_bonus +
+            0.05 * popularity_bonus
         )
-        # Более сбалансированная система - минимальная базовая награда для обучения
-        base_engagement = np.clip(base_engagement, 0.1, 0.9)  # Минимум 10%, максимум 90%
+        base_engagement = np.clip(base_engagement, 0.15, 0.95)  # Минимум 15%, максимум 95% (улучшен диапазон)
 
         # Calculate action probabilities and rewards
         actions = {}
 
         # 1. VIEW (просмотр) - базовое действие, всегда происходит
-        # Фиксированная положительная награда для стабильности обучения
+        view_reward = 0.1 + 0.2 * base_engagement
         actions['view'] = {
             'probability': 1.0,  # Всегда происходит
-            'reward': 0.2,  # Фиксированная базовая награда
+            'reward': view_reward,  # Награда зависит от качества рекомендации
             'description': 'Пользователь просмотрел товар'
         }
 
-        # 2. LIKE (добавить в избранное) - увеличена вероятность
-        like_prob = base_engagement * 0.4 + np.random.normal(0, 0.02)
+        # 2. LIKE (добавить в избранное)
+        like_prob = base_engagement * 0.5 + np.random.normal(0, 0.02)
         actions['like'] = {
-            'probability': np.clip(like_prob, 0, 0.50),  # Максимум 50%
-            'reward': 1.0,  # Увеличена награда
+            'probability': np.clip(like_prob, 0, 0.60),
+            'reward': 0.8 + 0.4 * base_engagement,
             'description': 'Пользователь добавил в избранное'
         }
 
         # 3. ADD_TO_CART (добавить в корзину) - увеличена вероятность
-        cart_prob = (base_engagement - 0.2) * 0.3 + np.random.normal(0, 0.01)
+        cart_prob = (base_engagement - 0.15) * 0.4 + np.random.normal(0, 0.01)  # Снижен порог, увеличена вероятность
         actions['add_to_cart'] = {
-            'probability': np.clip(cart_prob, 0, 0.25),  # Максимум 25%
-            'reward': 3.0,  # Увеличена награда
+            'probability': np.clip(cart_prob, 0, 0.30),  # Максимум 30%
+            'reward': 2.5 + 1.0 * base_engagement,  # Награда от 2.6 до 3.4
             'description': 'Пользователь добавил в корзину'
         }
 
         # 4. PURCHASE (покупка) - увеличена вероятность
-        purchase_prob = (base_engagement - 0.3) * 0.2 * price_match + np.random.normal(0, 0.005)
+        purchase_prob = (base_engagement - 0.25) * 0.25 * price_match + np.random.normal(0, 0.005)  # Снижен порог
         actions['purchase'] = {
-            'probability': np.clip(purchase_prob, 0, 0.15),  # Максимум 15%
-            'reward': 8.0,  # Немного снижена, но все еще высокая
+            'probability': np.clip(purchase_prob, 0, 0.20),  # Максимум 20%
+            'reward': 7.0 + 2.0 * base_engagement,  # Награда от 7.2 до 8.8
             'description': 'Пользователь купил товар'
         }
 
-        # 5. SHARE (поделиться) - увеличена вероятность
-        share_prob = quality * popularity * base_engagement * 0.1 + np.random.normal(0, 0.002)
+        # 5. SHARE (поделиться) - увеличена вероятность и зависимость от engagement
+        share_prob = quality * popularity * base_engagement * 0.12 + np.random.normal(0, 0.002)  # Увеличена вероятность
         actions['share'] = {
-            'probability': np.clip(share_prob, 0, 0.08),  # Максимум 8%
-            'reward': 4.0,  # Увеличена награда
+            'probability': np.clip(share_prob, 0, 0.10),  # Максимум 10%
+            'reward': 3.5 + 1.0 * base_engagement,  # Награда от 3.65 до 4.45
             'description': 'Пользователь поделился товаром'
         }
 
         # НЕГАТИВНЫЕ ДЕЙСТВИЯ - более реалистичные вероятности
 
-        # 6. DISLIKE (не понравилось) - умеренный штраф для стабильности
-        dislike_prob = (1 - base_engagement) * 0.2 + np.random.normal(0, 0.02)
+        # 6. DISLIKE (не понравилось) - умеренный штраф, зависит от base_engagement
+        dislike_prob = (1 - base_engagement) * 0.15 + np.random.normal(0, 0.02)  # Снижена вероятность
         actions['dislike'] = {
-            'probability': np.clip(dislike_prob, 0, 0.3),  # Максимум 30%
-            'reward': -0.3,  # Фиксированный умеренный штраф
+            'probability': np.clip(dislike_prob, 0, 0.25),  # Максимум 25%
+            'reward': -0.2 - 0.2 * (1 - base_engagement),  # Штраф от -0.2 до -0.38
             'description': 'Пользователю не понравился товар'
         }
 

@@ -32,6 +32,16 @@ if 'auto_refresh' not in st.session_state:
 if 'last_comparison_id' not in st.session_state:
     st.session_state.last_comparison_id = None
 
+def get_average_reward(results: Dict[str, Any]) -> float:
+    """Get average reward with backward compatibility."""
+    # Try new structure first
+    if 'current_average_reward' in results and results['current_average_reward'] is not None:
+        return results['current_average_reward']
+    if 'cumulative_average_reward' in results and results['cumulative_average_reward'] is not None:
+        return results['cumulative_average_reward']
+    # Fallback to old structure
+    return results.get('average_reward', 0.0)
+
 # Стили CSS
 st.markdown("""
 <style>
@@ -191,21 +201,40 @@ def create_comprehensive_comparison_charts(experiments):
         agent_type = config['agent_type']
         
         # Основные метрики
+        avg_reward = get_average_reward(results)
+        cumulative_avg = results.get('cumulative_average_reward') or avg_reward
+        current_avg = results.get('current_average_reward') or avg_reward
+        performance_improvement = results.get('performance_improvement', 0.0)
+        
+        # Новые метрики
+        reward_stability = results.get('reward_stability', {})
+        recommendation_diversity = results.get('recommendation_diversity', {})
+        learning_efficiency = results.get('learning_efficiency', {})
+
         comparison_data.append({
             'Агент': agent_type.upper(),
-            'Средняя награда': results['average_reward'],
+            'Средняя награда': avg_reward,
+            'Общее среднее': cumulative_avg,
+            'Текущее среднее': current_avg,
+            'Улучшение': performance_improvement,
             'Общие действия': results['total_actions'],
             'Пользователи': results['total_users'],
             'Время выполнения': results['completion_time'],
             'Действий/сек': results['total_actions'] / results['completion_time'] if results['completion_time'] > 0 else 0,
-            'Эффективность': results['average_reward'] * (results['total_actions'] / results['completion_time']) if results['completion_time'] > 0 else 0,
+            'Эффективность': avg_reward * (results['total_actions'] / results['completion_time']) if results['completion_time'] > 0 else 0,
             'Товары': config['n_products'],
             'Действий/пользователь': config['actions_per_user']
         })
         
         # Кривые обучения
         if results.get('learning_curve'):
-            learning_curves[agent_type] = results['learning_curve']
+            curve = results['learning_curve']
+            # Если это список словарей, извлекаем current_avg
+            if curve and isinstance(curve[0], dict):
+                learning_curves[agent_type] = [point.get('current_avg', point.get('cumulative_avg', 0)) for point in curve]
+            else:
+                # Старый формат - список чисел
+                learning_curves[agent_type] = curve
         
         # Распределение действий
         if results.get('action_distribution'):
@@ -243,8 +272,14 @@ def create_comprehensive_comparison_charts(experiments):
                 'Время/сессию (с)': session_metrics.get('completion_time_per_session', 0.0)
             })
         
+        # Timeline наград (поддержка новой структуры)
         if results.get('reward_timeline'):
-            reward_timelines[agent_type] = results['reward_timeline']
+            timeline = results['reward_timeline']
+            # Если это список словарей, используем current_avg_reward
+            if timeline and isinstance(timeline[0], dict):
+                reward_timelines[agent_type] = timeline
+            else:
+                reward_timelines[agent_type] = timeline
     
     df = pd.DataFrame(comparison_data)
     
@@ -385,7 +420,7 @@ def create_comprehensive_comparison_charts(experiments):
         height=600
     )
     st.plotly_chart(fig_radar, config={'displayModeBar': False})
-    
+
     # 7. Распределение действий пользователей
     if action_distributions:
         st.markdown("### 🎭 Распределение действий пользователей")
@@ -485,9 +520,22 @@ def create_comprehensive_comparison_charts(experiments):
         for i, (agent, timeline) in enumerate(reward_timelines.items()):
             if not timeline:
                 continue
+            # Поддержка новой структуры с current_avg_reward
+            x_values = []
+            y_values = []
+            for point in timeline:
+                if isinstance(point, dict):
+                    x_values.append(point.get('actions', 0))
+                    # Используем current_avg_reward если доступно, иначе avg_reward (обратная совместимость)
+                    y_values.append(point.get('current_avg_reward') or point.get('avg_reward', 0))
+                else:
+                    # Старый формат
+                    x_values.append(len(x_values) * 100)
+                    y_values.append(point)
+            
             fig_timeline.add_trace(go.Scatter(
-                x=[point.get('actions', 0) for point in timeline],
-                y=[point.get('avg_reward', 0) for point in timeline],
+                x=x_values,
+                y=y_values,
                 mode='lines',
                 name=agent.upper(),
                 line=dict(color=colors[i % len(colors)], width=3)
@@ -495,7 +543,7 @@ def create_comprehensive_comparison_charts(experiments):
         fig_timeline.update_layout(
             title="Изменение средней награды по мере выполнения действий",
             xaxis_title="Количество действий",
-            yaxis_title="Средняя награда",
+            yaxis_title="Средняя награда (скользящее окно)",
             height=500,
             hovermode='x unified'
         )
@@ -623,7 +671,7 @@ def show_comparison_results():
     for i, exp in enumerate(final_experiments):
         with cols[i]:
             agent_name = exp['configuration']['agent_type'].upper()
-            reward = exp['results']['average_reward']
+            reward = get_average_reward(exp['results'])
             actions = exp['results']['total_actions']
             
             st.markdown(f"""
@@ -689,7 +737,8 @@ def main():
                 export_data.append({
                     'agent_type': config['agent_type'],
                     'experiment_name': exp['name'],
-                    'average_reward': results['average_reward'],
+                    'average_reward': get_average_reward(results),
+                    'current_average_reward': results.get('current_average_reward'),
                     'total_actions': results['total_actions'],
                     'completion_time': results['completion_time'],
                     'n_users': config['n_users'],
