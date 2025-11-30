@@ -29,7 +29,7 @@ class RecommendationService:
                 recommendations_data = await self._get_fallback_recommendations(db, limit)
             else:
                 # Get recommendations from global learning manager
-                recommendations_data = await learning_manager.get_recommendations(user_id, limit)
+                recommendations_data = await learning_manager.get_recommendations(user_id, limit, db=db)
 
             if not recommendations_data:
                 recommendations_data = await self._get_fallback_recommendations(
@@ -157,12 +157,13 @@ class RecommendationService:
                     'current_session_reward': session_state.get('current_session_reward', 0.0),
                     'average_reward': session_state.get('average_reward', reward)
                 }
-                learning_manager.learn_from_action(
+                await learning_manager.learn_from_action(
                     user_id,
                     product_id,
                     action,
                     reward,
-                    session_context=session_context
+                    session_context=session_context,
+                    db=db
                 )
                 await learning_manager.update_user_preferences(db, user_id, product_id, action)
             

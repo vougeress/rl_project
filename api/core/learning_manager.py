@@ -106,55 +106,59 @@ class GlobalLearningManager:
                 
         except Exception as e:
             print(f"❌ Failed to save products to DB: {e}")
-    
+
     async def _pretrain_agent(self, episodes: int = 30):
         """Pre-train the agent asynchronously."""
         print(f"🧠 Pre-training agent for {episodes} episodes...")
-        
+
+        all_step_rewards = []
         for episode in range(episodes):
             state = self.env.reset()
             episode_reward = 0
-            
+            episode_steps = 0
+
             for step in range(min(15, self.env.max_session_length)):
                 action = self.agent.select_action(state)
                 next_state, reward, done, info = self.env.step(action)
-                
+
                 # Train the agent
                 if hasattr(self.agent, 'update'):
                     self.agent.update(state, action, reward, next_state, done)
-                
+
                 state = next_state
                 episode_reward += reward
-                
+                episode_steps += 1
+                all_step_rewards.append(reward)  # Сохраняем награду за шаг
+
                 if done:
                     break
-                
-                # Yield control to event loop periodically
+
                 if step % 5 == 0:
                     await asyncio.sleep(0)
-            
+
             self.learning_history.append({
                 "episode": episode,
                 "reward": episode_reward,
+                "episode_steps": episode_steps,
+                "avg_step_reward": episode_reward / max(episode_steps, 1),
                 "type": "pretrain",
                 "timestamp": datetime.now()
             })
-            
-            # Yield control between episodes
+
             await asyncio.sleep(0)
-        
-        avg_reward = np.mean([h['reward'] for h in self.learning_history])
-        print(f"✅ Pre-training completed! Average reward: {avg_reward:.3f}")
+
+        avg_step_reward = np.mean(all_step_rewards) if all_step_rewards else 0.0
+        print(f"✅ Pre-training completed! Average reward per step: {avg_step_reward:.3f}")
+        print(f"   Total episodes: {episodes}, Total steps: {len(all_step_rewards)}")
     
-    async def get_recommendations(self, user_id: int, limit: int = 20) -> list:
-        """Get recommendations using the trained agent."""
+    async def get_recommendations(self, user_id: int, limit: int = 20, db: Optional[Any] = None) -> list:
+        """Get recommendations using the trained agent with user preferences."""
         if not self.is_ready:
             print("⚠️ Learning system not ready, using fallback recommendations")
             return self._get_fallback_recommendations(limit)
         
-        # Get user state - ensure user_id is within bounds
-        simulator_user_id = user_id % self.simulator.n_users
-        user_state = self.simulator.get_user_state(simulator_user_id)
+        # Get user state - try to use real user preferences if available
+        user_state = await self._get_user_state_with_preferences(user_id, db)
         
         # Generate recommendations
         recommendations = []
@@ -176,6 +180,50 @@ class GlobalLearningManager:
                 recommendations.append(product_info)
         
         return recommendations
+    
+    async def _get_user_state_with_preferences(self, user_id: int, db: Optional[Any] = None) -> np.ndarray:
+        """Get user state, incorporating real preferences from DB if available."""
+        # Base state from simulator
+        simulator_user_id = user_id % self.simulator.n_users
+        base_state = self.simulator.get_user_state(simulator_user_id)
+        
+        # Try to enhance with real user preferences from DB
+        if db is not None:
+            try:
+                from api.models.database_models import User
+                stmt = select(User).where(User.user_id == user_id)
+                result = await db.execute(stmt)
+                user = result.scalar_one_or_none()
+                
+                if user and user.category_preferences and user.style_preferences:
+                    # Blend simulator state with real preferences
+                    # Real preferences have higher weight for category and style dimensions
+                    state_array = base_state.copy()
+                    
+                    # Update category preferences (indices 5-14 in state vector)
+                    category_names = ['Electronics', 'Clothing', 'Books', 'Home & Garden', 
+                                    'Sports', 'Beauty', 'Toys', 'Automotive', 'Health', 'Food']
+                    for i, category in enumerate(category_names):
+                        if i + 5 < len(state_array):
+                            real_pref = user.category_preferences.get(category, 0.5)
+                            # Blend: 70% real preferences, 30% simulator
+                            state_array[i + 5] = 0.7 * real_pref + 0.3 * state_array[i + 5]
+                    
+                    # Update style preferences (indices 15+ in state vector)
+                    style_keys = sorted([k for k in user.style_preferences.keys() if k.startswith('style_')])
+                    for i, style_key in enumerate(style_keys):
+                        style_idx = 15 + i
+                        if style_idx < len(state_array):
+                            real_pref = user.style_preferences.get(style_key, 0.0)
+                            # Blend: 70% real preferences, 30% simulator
+                            state_array[style_idx] = 0.7 * real_pref + 0.3 * state_array[style_idx]
+                    
+                    return state_array
+            except Exception as e:
+                # If DB access fails, fall back to simulator state
+                pass
+        
+        return base_state
     
     def _get_fallback_recommendations(self, limit: int) -> list:
         """Fallback recommendations when system is not ready."""
@@ -205,26 +253,56 @@ class GlobalLearningManager:
                 for i in range(limit)
             ]
     
-    def learn_from_action(
+    async def learn_from_action(
         self,
         user_id: int,
         product_id: int,
         action: str,
         reward: float,
-        session_context: Optional[Dict[str, Any]] = None
+        session_context: Optional[Dict[str, Any]] = None,
+        db: Optional[Any] = None
     ):
-        """Update agent based on user action."""
+        """Update agent based on user action with enhanced state."""
         if not self.is_ready:
             print("⚠️ Learning system not ready, skipping learning update")
             return
         
         try:
-            # Get user state - ensure user_id is within bounds
-            simulator_user_id = user_id % self.simulator.n_users
-            user_state = self.simulator.get_user_state(simulator_user_id)
+            # Get user state with real preferences if available
+            user_state = await self._get_user_state_with_preferences(user_id, db)
             
-            # Create next state (simulate progression)
-            next_state = self.simulator.get_user_state(simulator_user_id, 1)
+            # Create next state (simulate progression with session time)
+            session_time = session_context.get('current_session_actions', 0) if session_context else 0
+            simulator_user_id = user_id % self.simulator.n_users
+            next_state = self.simulator.get_user_state(simulator_user_id, session_time + 1)
+            
+            # Enhance next state with preferences if available
+            if db is not None:
+                try:
+                    from api.models.database_models import User
+                    stmt = select(User).where(User.user_id == user_id)
+                    result = await db.execute(stmt)
+                    user = result.scalar_one_or_none()
+                    
+                    if user and user.category_preferences and user.style_preferences:
+                        # Blend next state with real preferences
+                        category_names = ['Electronics', 'Clothing', 'Books', 'Home & Garden', 
+                                        'Sports', 'Beauty', 'Toys', 'Automotive', 'Health', 'Food']
+                        for i, category in enumerate(category_names):
+                            if i + 5 < len(next_state):
+                                real_pref = user.category_preferences.get(category, 0.5)
+                                next_state[i + 5] = 0.7 * real_pref + 0.3 * next_state[i + 5]
+                        
+                        style_keys = sorted([k for k in user.style_preferences.keys() if k.startswith('style_')])
+                        for i, style_key in enumerate(style_keys):
+                            style_idx = 15 + i
+                            if style_idx < len(next_state):
+                                real_pref = user.style_preferences.get(style_key, 0.0)
+                                next_state[style_idx] = 0.7 * real_pref + 0.3 * next_state[style_idx]
+                except Exception:
+                    pass
+            
+            # Calculate reward signal with context
             reward_signal = reward
             if session_context:
                 session_actions = session_context.get('current_session_actions', 0)
@@ -260,7 +338,7 @@ class GlobalLearningManager:
         
         total_episodes = len(self.learning_history)
         user_actions = [h for h in self.learning_history if h["type"] == "user_action"]
-        
+
         if total_episodes > 0:
             avg_reward = np.mean([h["reward"] for h in self.learning_history])
             recent_rewards = [h["reward"] for h in self.learning_history[-10:]]
@@ -274,7 +352,7 @@ class GlobalLearningManager:
         for h in user_actions:
             action = h.get("action", "unknown")
             action_counts[action] = action_counts.get(action, 0) + 1
-        
+
         return {
             "status": "active",
             "total_episodes": total_episodes,

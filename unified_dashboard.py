@@ -16,6 +16,14 @@ from typing import Dict, List, Any, Optional
 # Configuration
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 
+def get_average_reward(results: Dict[str, Any]) -> float:
+    """Return the most relevant average reward metric."""
+    if results.get('current_average_reward') is not None:
+        return results['current_average_reward']
+    if results.get('cumulative_average_reward') is not None:
+        return results['cumulative_average_reward']
+    return results.get('average_reward', 0.0)
+
 # Page configuration
 st.set_page_config(
     page_title="🤖 RL Agents Comparison",
@@ -191,21 +199,35 @@ def create_comprehensive_comparison_charts(experiments):
         agent_type = config['agent_type']
         
         # Main metrics
+        avg_reward = get_average_reward(results)
+        cumulative_avg = results.get('cumulative_average_reward') or avg_reward
+        current_avg = results.get('current_average_reward') or avg_reward
+        performance_improvement = results.get('performance_improvement', 0.0)
+        
         comparison_data.append({
             'Agent': agent_type.upper(),
-            'Average Reward': results['average_reward'],
+            'Average Reward': avg_reward,
+            'Cumulative Average': cumulative_avg,
+            'Current Average': current_avg,
+            'Improvement': performance_improvement,
             'Total Actions': results['total_actions'],
             'Users': results['total_users'],
             'Completion Time': results['completion_time'],
             'Actions/sec': results['total_actions'] / results['completion_time'] if results['completion_time'] > 0 else 0,
-            'Efficiency': results['average_reward'] * (results['total_actions'] / results['completion_time']) if results['completion_time'] > 0 else 0,
+            'Efficiency': avg_reward * (results['total_actions'] / results['completion_time']) if results['completion_time'] > 0 else 0,
             'Products': config['n_products'],
             'Actions per User': config['actions_per_user']
         })
         
         # Learning curves
         if results.get('learning_curve'):
-            learning_curves[agent_type] = results['learning_curve']
+            curve = results['learning_curve']
+            # Support both dict-based and numeric curves
+            if curve and isinstance(curve[0], dict):
+                learning_curves[agent_type] = [point.get('current_avg', point.get('cumulative_avg', 0)) for point in curve]
+            else:
+                # Legacy format - list of floats
+                learning_curves[agent_type] = curve
         
         # Action distributions
         if results.get('action_distribution'):
@@ -243,8 +265,14 @@ def create_comprehensive_comparison_charts(experiments):
                 'Time per Session (s)': session_metrics.get('completion_time_per_session', 0.0)
             })
         
+        # Reward timeline (supporting new structure)
         if results.get('reward_timeline'):
-            reward_timelines[agent_type] = results['reward_timeline']
+            timeline = results['reward_timeline']
+            # Handle dict timeline entries
+            if timeline and isinstance(timeline[0], dict):
+                reward_timelines[agent_type] = timeline
+            else:
+                reward_timelines[agent_type] = timeline
     
     df = pd.DataFrame(comparison_data)
     
@@ -385,7 +413,6 @@ def create_comprehensive_comparison_charts(experiments):
         height=600
     )
     st.plotly_chart(fig_radar, config={'displayModeBar': False})
-    
     # 7. User action distribution
     if action_distributions:
         st.markdown("### 🎭 User Action Distribution")
@@ -485,17 +512,30 @@ def create_comprehensive_comparison_charts(experiments):
         for i, (agent, timeline) in enumerate(reward_timelines.items()):
             if not timeline:
                 continue
+            # Support new timeline schema containing current_avg_reward
+            x_values = []
+            y_values = []
+            for point in timeline:
+                if isinstance(point, dict):
+                    x_values.append(point.get('actions', 0))
+                    # Prefer current_avg_reward; fall back to avg_reward for legacy data
+                    y_values.append(point.get('current_avg_reward') or point.get('avg_reward', 0))
+                else:
+                    # Legacy format
+                    x_values.append(len(x_values) * 100)
+                    y_values.append(point)
+            
             fig_timeline.add_trace(go.Scatter(
-                x=[point.get('actions', 0) for point in timeline],
-                y=[point.get('avg_reward', 0) for point in timeline],
+                x=x_values,
+                y=y_values,
                 mode='lines',
                 name=agent.upper(),
                 line=dict(color=colors[i % len(colors)], width=3)
             ))
         fig_timeline.update_layout(
-            title="Average Reward Change During Action Execution",
+            title="Average Reward Trend During Experiment",
             xaxis_title="Number of Actions",
-            yaxis_title="Average Reward",
+            yaxis_title="Average Reward (rolling)",
             height=500,
             hovermode='x unified'
         )
@@ -623,7 +663,7 @@ def show_comparison_results():
     for i, exp in enumerate(final_experiments):
         with cols[i]:
             agent_name = exp['configuration']['agent_type'].upper()
-            reward = exp['results']['average_reward']
+            reward = get_average_reward(exp['results'])
             actions = exp['results']['total_actions']
             
             st.markdown(f"""
@@ -689,7 +729,8 @@ def main():
                 export_data.append({
                     'agent_type': config['agent_type'],
                     'experiment_name': exp['name'],
-                    'average_reward': results['average_reward'],
+                    'average_reward': get_average_reward(results),
+                    'current_average_reward': results.get('current_average_reward'),
                     'total_actions': results['total_actions'],
                     'completion_time': results['completion_time'],
                     'n_users': config['n_users'],

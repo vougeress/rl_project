@@ -318,15 +318,18 @@ class ExperimentResults(BaseSchema):
     total_users: int
     total_actions: int
     total_rewards: float
-    average_reward: float
+    average_reward: float  # Cumulative average (backward compatibility)
+    cumulative_average_reward: Optional[float] = None  # Overall average
+    current_average_reward: Optional[float] = None  # Recent performance (sliding window)
+    performance_improvement: Optional[float] = None  # Improvement from start to end
     action_distribution: Dict[str, int]
-    learning_curve: List[float]
+    learning_curve: List[Any]  # Can be float or dict with cumulative_avg and current_avg
     completion_time: float
     agent_performance: Dict[str, Any]
     reward_distribution: Dict[str, Dict[str, float]]
     conversion_metrics: Dict[str, float]
     session_metrics: Dict[str, Any]
-    reward_timeline: List[Dict[str, float]]
+    reward_timeline: List[Dict[str, Any]]
 
 class StartExperimentResponse(BaseSchema):
     message: str
