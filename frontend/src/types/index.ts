@@ -71,6 +71,14 @@ export interface UserAction {
   experiment_id?: string;
 }
 
+export interface UserActionResponse {
+  success: boolean;
+  action_id: number;
+  session_id: string;
+  reward: number;
+  message: string;
+}
+
 // Recommendations
 export interface RecommendationsResponse {
   products: Product[];

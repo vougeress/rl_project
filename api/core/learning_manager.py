@@ -6,7 +6,7 @@ import numpy as np
 import asyncio
 from datetime import datetime
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from sqlalchemy import select
 from typing import Dict, List, Optional, Any
 
@@ -142,7 +142,7 @@ class GlobalLearningManager:
                 "episode_steps": episode_steps,
                 "avg_step_reward": episode_reward / max(episode_steps, 1),
                 "type": "pretrain",
-                "timestamp": datetime.now()
+                "timestamp": datetime.now(timezone.utc)
             })
 
             await asyncio.sleep(0)
@@ -322,7 +322,7 @@ class GlobalLearningManager:
                     "action": action,
                     "user_id": user_id,
                     "product_id": product_id,
-                    "timestamp": datetime.now(),
+                    "timestamp": datetime.now(timezone.utc),
                     "session": session_context or {}
                 })
                 
@@ -382,7 +382,7 @@ class GlobalLearningManager:
     """
     async def update_user_preferences(self, db, user_id: int, product_id: int, action: str):
         try:
-            thirty_days_ago = datetime.now() - timedelta(days=30)
+            thirty_days_ago = datetime.now(timezone.utc) - timedelta(days=30)
             
             stmt = select(UserAction).where(
                 UserAction.user_id == user_id,

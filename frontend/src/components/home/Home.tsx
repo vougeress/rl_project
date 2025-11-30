@@ -80,20 +80,10 @@ export function Home({ userId, userName, onLogout }: HomeProps) {
     loadCartCount();
   }, [userId, recommendationCacheKey, loadProducts, loadCartCount]);
 
-  const handleProductClick = async (product: Product) => {
-    // Track view action
-    try {
-      await apiService.processAction(userId, {
-        user_id: userId,
-        product_id: product.product_id,
-        action_type: 'view'
-      });
-    } catch (err) {
-      console.error('Failed to log view action:', err);
-      setError(err instanceof Error ? err.message : 'Failed to log action');
-    } finally {
-      navigate(`/product/${product.product_id}`);
-    }
+  const handleProductClick = (product: Product) => {
+    // Placeholder for future telemetry
+    console.debug('Navigating to product', product.product_id);
+    navigate(`/product/${product.product_id}`);
   };
 
   const handleCartClick = () => {

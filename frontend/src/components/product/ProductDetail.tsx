@@ -28,6 +28,13 @@ export function ProductDetail({ userId }: ProductDetailProps) {
   const [reported, setReported] = useState(false);
   const [addedToCart, setAddedToCart] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<{ reward: number; message: string } | null>(null);
+
+  useEffect(() => {
+    if (!actionFeedback) return;
+    const timer = setTimeout(() => setActionFeedback(null), 5000);
+    return () => clearTimeout(timer);
+  }, [actionFeedback]);
 
   useEffect(() => {
     if (productId) {
@@ -51,17 +58,21 @@ export function ProductDetail({ userId }: ProductDetailProps) {
 
   const handleLike = async () => {
     if (!product) return;
-    
+
     const newLiked = !liked;
     setLiked(newLiked);
-    if (newLiked) setDisliked(false);
+    if (newLiked) {
+      setDisliked(false);
+    }
+
     try {
       setError(null);
-      await apiService.processAction(userId, {
+      const response = await apiService.processAction(userId, {
         user_id: userId,
         product_id: product.product_id,
-        action_type: 'like'
+        action_type: newLiked ? 'like' : 'close_immediately'
       });
+      setActionFeedback({ reward: response.reward, message: response.message });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send like');
       setLiked(!newLiked);
@@ -70,17 +81,21 @@ export function ProductDetail({ userId }: ProductDetailProps) {
 
   const handleDislike = async () => {
     if (!product) return;
-    
+
     const newDisliked = !disliked;
     setDisliked(newDisliked);
-    if (newDisliked) setLiked(false);
+    if (newDisliked) {
+      setLiked(false);
+    }
+
     try {
       setError(null);
-      await apiService.processAction(userId, {
+      const response = await apiService.processAction(userId, {
         user_id: userId,
         product_id: product.product_id,
-        action_type: 'dislike'
+        action_type: newDisliked ? 'dislike' : 'view'
       });
+      setActionFeedback({ reward: response.reward, message: response.message });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send dislike');
       setDisliked(!newDisliked);
@@ -89,16 +104,18 @@ export function ProductDetail({ userId }: ProductDetailProps) {
 
   const handleReport = async () => {
     if (!product) return;
-    
+
     const newReported = !reported;
     setReported(newReported);
+
     try {
       setError(null);
-      await apiService.processAction(userId, {
+      const response = await apiService.processAction(userId, {
         user_id: userId,
         product_id: product.product_id,
         action_type: newReported ? 'report' : 'view'
       });
+      setActionFeedback({ reward: response.reward, message: response.message });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to send report');
       setReported(!newReported);
@@ -111,12 +128,6 @@ export function ProductDetail({ userId }: ProductDetailProps) {
     try {
       setError(null);
       await apiService.addToCart(userId, product.product_id, 1);
-      
-      await apiService.processAction(userId, {
-        user_id: userId,
-        product_id: product.product_id,
-        action_type: 'add_to_cart'
-      });
 
       setAddedToCart(true);
       setTimeout(() => setAddedToCart(false), 3000);
@@ -208,6 +219,14 @@ export function ProductDetail({ userId }: ProductDetailProps) {
             {error && (
               <div className="error-message" style={{ marginTop: '0.75rem' }}>
                 {error}
+              </div>
+            )}
+
+            {actionFeedback && (
+              <div className="success-message" style={{ marginTop: '0.75rem' }}>
+                reward: {actionFeedback.reward.toFixed(2)}
+                <br />
+                message: {actionFeedback.message}
               </div>
             )}
 

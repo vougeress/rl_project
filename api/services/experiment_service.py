@@ -7,7 +7,7 @@ import random
 import uuid
 import time
 import numpy as np
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 from collections import defaultdict
 
@@ -50,7 +50,7 @@ class ExperimentService:
                 configuration=config.model_dump(),
                 agent_type=config.agent_type,
                 agent_params=config.model_dump(),
-                start_time=datetime.now()
+                start_time=datetime.now(timezone.utc)
             )
             
             db.add(experiment)
@@ -94,7 +94,7 @@ class ExperimentService:
                 if experiment:
                     experiment.status = 'failed'
                     experiment.error_message = "Learning system not ready"
-                    experiment.end_time = datetime.now()
+                    experiment.end_time = datetime.now(timezone.utc)
                     await db.commit()
                 return
             
@@ -178,7 +178,7 @@ class ExperimentService:
                                         action_type=action_name,
                                         reward=action_reward,
                                         session_time=action_num,
-                                        action_timestamp=datetime.now(),
+                                        action_timestamp=datetime.now(timezone.utc),
                                         experiment_id=experiment_id,
                                         session_id=session_id
                                     )
@@ -326,7 +326,7 @@ class ExperimentService:
             if experiment:
                 experiment.status = 'completed'
                 experiment.progress = 1.0
-                experiment.end_time = datetime.now()
+                experiment.end_time = datetime.now(timezone.utc)
                 experiment.results = {
                     'total_users': users_created,
                     'total_actions': total_actions,
@@ -350,7 +350,7 @@ class ExperimentService:
             if experiment:
                 experiment.status = 'failed'
                 experiment.error_message = str(e)
-                experiment.end_time = datetime.now()
+                experiment.end_time = datetime.now(timezone.utc)
                 await db.commit()
             print(f"Experiment {experiment_id} failed: {e}")
         
@@ -466,7 +466,7 @@ class ExperimentService:
                 
                 if experiment:
                     experiment.status = 'cancelled'
-                    experiment.end_time = datetime.now()
+                    experiment.end_time = datetime.now(timezone.utc)
                     await db.commit()
                 
                 del self.running_experiments[experiment_id]

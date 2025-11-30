@@ -5,7 +5,7 @@ Service for batch training operations - bulk user creation and actions simulatio
 import asyncio
 import random
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import List, Dict, Any, Optional
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -218,7 +218,7 @@ class BatchTrainingService:
                 'learning_episodes': learning_stats.get('total_episodes', 0),
                 'current_epsilon': current_epsilon,
                 'average_reward': average_reward,
-                'last_update': datetime.now().isoformat()
+                'last_update': datetime.now(timezone.utc).isoformat()
             }
         except Exception as e:
             # Fallback response
@@ -228,7 +228,7 @@ class BatchTrainingService:
                 'learning_episodes': 0,
                 'current_epsilon': 0.0,
                 'average_reward': 0.0,
-                'last_update': datetime.now().isoformat(),
+                'last_update': datetime.now(timezone.utc).isoformat(),
                 'error': str(e)
             }
     
@@ -238,7 +238,7 @@ class BatchTrainingService:
             'total_users': 0,
             'total_actions': 0,
             'learning_episodes': 0,
-            'start_time': datetime.now()
+            'start_time': datetime.now(timezone.utc)
         }
         
         # Reset agent if needed

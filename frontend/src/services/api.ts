@@ -4,11 +4,12 @@ import {
   UserRegistrationResponse,
   Product,
   RecommendationsResponse,
-  UserAction,
   CartResponse,
   CartItem,
   CategoryName,
-  CATEGORIES
+  CATEGORIES,
+  UserAction,
+  UserActionResponse
 } from '../types';
 import { getRandomCategoryImage } from '../utils/categoryImages';
 
@@ -214,10 +215,11 @@ export const apiService = {
     return fetchProductInfo(productId);
   },
 
-  async processAction(userId: number, action: UserAction): Promise<any> {
-    return apiCall(`/${userId}/actions`, 'POST', {
+  async processAction(userId: number, action: UserAction): Promise<UserActionResponse> {
+    return apiCall<UserActionResponse>(`/${userId}/actions`, 'POST', {
       ...action,
-      user_id: action.user_id ?? userId
+      user_id: action.user_id ?? userId,
+      experiment_id: action.experiment_id ?? null
     });
   },
 

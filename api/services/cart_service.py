@@ -3,7 +3,7 @@ Shopping cart service for handling cart operations and orders.
 """
 
 from typing import Dict, List, Any
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 
@@ -45,7 +45,7 @@ class CartService:
                     user_id=user_id,
                     product_id=cart_data.product_id,
                     quantity=cart_data.quantity,
-                    added_at=datetime.now()
+                    added_at=datetime.now(timezone.utc)
                 )
                 db.add(cart_item)
             
@@ -58,7 +58,7 @@ class CartService:
                 action_type='add_to_cart',
                 reward=2.0,  # Higher reward for cart actions
                 session_time=0,
-                action_timestamp=datetime.now()
+                action_timestamp=datetime.now(timezone.utc)
             )
             db.add(user_action)
             
@@ -214,7 +214,7 @@ class CartService:
                 user_id=user_id,
                 total_price=total_price,
                 status='confirmed',
-                order_date=datetime.now(),
+                order_date=datetime.now(timezone.utc),
                 items=items_data
             )
             
@@ -229,7 +229,7 @@ class CartService:
                     action_type='purchase',
                     reward=5.0,  # High reward for purchases
                     session_time=0,
-                    action_timestamp=datetime.now()
+                    action_timestamp=datetime.now(timezone.utc)
                 )
                 db.add(user_action)
                 
@@ -306,7 +306,7 @@ class CartService:
                 action_type='remove_from_cart',
                 reward=-0.5,
                 session_time=0,
-                action_timestamp=datetime.now()
+                action_timestamp=datetime.now(timezone.utc)
             )
             db.add(user_action)
             

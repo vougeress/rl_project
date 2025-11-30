@@ -138,8 +138,12 @@ class RecommendationService:
                     experiment_id = None
 
             reward = self._calculate_reward(action, product)
-            
-            session_time = int((datetime.now(timezone.utc) - user_session.start_time).total_seconds())
+
+            current_time = datetime.now(timezone.utc)
+            session_start = user_session.start_time
+            if session_start.tzinfo is None or session_start.tzinfo.utcoffset(session_start) is None:
+                session_start = session_start.replace(tzinfo=timezone.utc)
+            session_time = int((current_time - session_start).total_seconds())
 
             user_action = UserAction(
                 user_id=user_id,
@@ -149,7 +153,7 @@ class RecommendationService:
                 session_time=session_time,
                 session_id=actual_session_id,
                 experiment_id=experiment_id,
-                action_timestamp=datetime.now(timezone.utc)
+                action_timestamp=current_time
             )
 
             db.add(user_action)

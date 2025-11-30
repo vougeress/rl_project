@@ -116,7 +116,7 @@ export function Checkout({ userId, userName }: CheckoutProps) {
         <div className="checkout-card">
           <h2 className="checkout-title">Complete Your Order</h2>
 
-          <form onSubmit={handleSubmit} className="checkout-form">
+          <form onSubmit={handleSubmit} className="checkout-form" noValidate>
             <div className="form-section">
               <h3 className="section-title">Contact Information</h3>
 
@@ -128,7 +128,7 @@ export function Checkout({ userId, userName }: CheckoutProps) {
                   className="form-input"
                   value={formData.fullName}
                   onChange={(e) => setFormData({ ...formData, fullName: e.target.value })}
-                  required
+                  placeholder="Optional"
                 />
               </div>
 
@@ -141,7 +141,7 @@ export function Checkout({ userId, userName }: CheckoutProps) {
                     className="form-input"
                     value={formData.email}
                     onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                    required
+                    placeholder="Optional"
                   />
                 </div>
 
@@ -153,7 +153,7 @@ export function Checkout({ userId, userName }: CheckoutProps) {
                     className="form-input"
                     value={formData.phone}
                     onChange={(e) => setFormData({ ...formData, phone: e.target.value })}
-                    required
+                    placeholder="Optional"
                   />
                 </div>
               </div>
@@ -170,7 +170,7 @@ export function Checkout({ userId, userName }: CheckoutProps) {
                   className="form-input"
                   value={formData.address}
                   onChange={(e) => setFormData({ ...formData, address: e.target.value })}
-                  required
+                  placeholder="Optional"
                 />
               </div>
 
@@ -183,7 +183,7 @@ export function Checkout({ userId, userName }: CheckoutProps) {
                     className="form-input"
                     value={formData.city}
                     onChange={(e) => setFormData({ ...formData, city: e.target.value })}
-                    required
+                    placeholder="Optional"
                   />
                 </div>
 
@@ -195,7 +195,7 @@ export function Checkout({ userId, userName }: CheckoutProps) {
                     className="form-input"
                     value={formData.zipCode}
                     onChange={(e) => setFormData({ ...formData, zipCode: e.target.value })}
-                    required
+                    placeholder="Optional"
                   />
                 </div>
               </div>
@@ -210,7 +210,7 @@ export function Checkout({ userId, userName }: CheckoutProps) {
                   rows={3}
                   value={formData.notes}
                   onChange={(e) => setFormData({ ...formData, notes: e.target.value })}
-                  placeholder="Any special instructions?"
+                  placeholder="Optional"
                   style={{ resize: 'vertical', fontFamily: 'inherit' }}
                 />
               </div>
@@ -259,17 +259,17 @@ export function Checkout({ userId, userName }: CheckoutProps) {
       </main>
 
       {showSuccess && (
-        <div className="success-modal" onClick={handleSuccessClose}>
+            <div className="success-modal" onClick={handleSuccessClose}>
           <div className="success-modal-content" onClick={(e) => e.stopPropagation()}>
             <div className="success-icon">
               <CheckCircle size={48} />
             </div>
-            <h2 className="success-modal-title">Order Placed Successfully!</h2>
-            <p className="success-modal-text">
-              Your order #{orderId} has been confirmed.
-              <br />
-              We'll send you a confirmation email shortly.
-            </p>
+                <h2 className="success-modal-title">Order Confirmed!</h2>
+                <p className="success-modal-text">
+                  We are already preparing order #{orderId || 'NEW'}.
+                  <br />
+                  Thanks for choosing ShopSmart.
+                </p>
             <button className="success-modal-button" onClick={handleSuccessClose}>
               Continue Shopping
             </button>
