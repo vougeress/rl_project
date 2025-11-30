@@ -20,7 +20,7 @@ async def register_user(
 ):
     try:
         user_service = UserService()
-        return user_service.register_user(db, user_data, experiment_id)
+        return await user_service.register_user(db, user_data, experiment_id)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
@@ -34,7 +34,7 @@ async def get_user_info(
 ):
     try:
         user_service = UserService()
-        user = user_service.get_user_by_id(db, user_id)
+        user = await user_service.get_user_by_id(db, user_id)
         if not user:
             raise HTTPException(status_code=404, detail="User not found")
         

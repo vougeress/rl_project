@@ -107,6 +107,8 @@ class CartService:
                         'added_at': cart_item.added_at,
                         'product_info': ProductInfo(
                             product_id=product.product_id,
+                            product_name=product.product_name,
+                            name_format=getattr(product, 'name_format', None),
                             category_name=product.category_name,
                             price=product.price,
                             popularity=product.popularity,
