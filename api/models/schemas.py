@@ -16,7 +16,7 @@ class ExperimentConfig(BaseModel):
     n_users: int = 50
     n_episodes: int = 200
     max_session_length: int = 20
-    agents: List[str] = ["epsilon_greedy", "linucb", "dqn", "random"]
+    agents: List[str] = ["epsilon_greedy", "linucb", "dqn"]
     agent_params: Dict[str, Dict] = {}
 
 
@@ -310,7 +310,7 @@ class ExperimentConfiguration(BaseSchema):
     n_users: int = Field(100, ge=10, le=1000, description="Number of users to create")
     actions_per_user: int = Field(20, ge=1, le=100, description="Actions per user")
     simulation_speed: float = Field(2.0, ge=0.1, le=10.0, description="Simulation speed")
-    agent_type: str = Field("dqn", pattern="^(dqn|epsilon_greedy|linucb|random)$")
+    agent_type: str = Field("dqn", pattern="^(dqn|epsilon_greedy|linucb)$")
 
 
 class ExperimentResults(BaseSchema):

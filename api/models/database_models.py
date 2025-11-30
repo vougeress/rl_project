@@ -75,7 +75,7 @@ class Experiment(Base):
     __table_args__ = (
         CheckConstraint("status IN ('pending', 'running', 'completed', 'failed', 'cancelled')", name='status_check'),
         CheckConstraint('progress >= 0 AND progress <= 1', name='progress_check'),
-        CheckConstraint("agent_type IN ('dqn', 'linucb', 'epsilon_greedy', 'random')", name='agent_type_check'),
+        CheckConstraint("agent_type IN ('dqn', 'linucb', 'epsilon_greedy')", name='agent_type_check'),
         Index('idx_experiments_status', 'status'),
         Index('idx_experiments_agent', 'agent_type'),
     )

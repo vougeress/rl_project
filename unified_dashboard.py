@@ -114,12 +114,11 @@ def make_api_request(endpoint: str, method: str = "GET", data: Dict = None) -> t
 
 def launch_agent_comparison_experiment(config):
     """Launch comparison experiment for all agents."""
-    agents = ["dqn", "epsilon_greedy", "linucb", "random"]
+    agents = ["dqn", "epsilon_greedy", "linucb"]
     agent_names = {
         "dqn": "Deep Q-Network",
         "epsilon_greedy": "Epsilon-Greedy",
-        "linucb": "LinUCB",
-        "random": "Random Baseline"
+        "linucb": "LinUCB"
     }
     
     experiment_ids = []
@@ -559,11 +558,10 @@ def show_experiment_launcher():
         with col2:
             st.markdown("### 🤖 Agents for Comparison")
             st.markdown("""
-            **All 4 agents will be tested:**
+            **All 3 agents will be tested:**
             - 🧠 **Deep Q-Network (DQN)** - deep reinforcement learning
             - 🎯 **Epsilon-Greedy** - simple bandit algorithm
             - 📈 **LinUCB** - contextual bandit with linear model
-            - 🎲 **Random Baseline** - random selection for comparison
             """)
             
             estimated_time = (n_users * actions_per_user * 4 * 0.1) / simulation_speed

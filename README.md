@@ -1,11 +1,11 @@
 # RL E-commerce Recommendation System
 
-An end-to-end playground for reinforcement-learning driven recommendations in an e-commerce setting. The project couples a FastAPI backend, PostgreSQL storage, and a Streamlit dashboard to simulate shopper behaviour, train multiple agents (DQN, LinUCB, epsilon-greedy, random baseline), and visualise experiment outcomes.
+An end-to-end playground for reinforcement-learning driven recommendations in an e-commerce setting. The project couples a FastAPI backend, PostgreSQL storage, and a Streamlit dashboard to simulate shopper behaviour, train multiple agents (DQN, LinUCB, epsilon-greedy), and visualise experiment outcomes.
 
 ## Features
 
 - **Synthetic shop simulation** – realistic catalogue/user generation (`src/data_generation.py`) and environment dynamics (`src/environment.py`).
-- **Multiple RL agents** – modular agent factory (`src/agents/`) with DQN, LinUCB, epsilon-greedy, and random policies.
+- **Multiple RL agents** – modular agent factory (`src/agents/`) with DQN, LinUCB, and epsilon-greedy.
 - **FastAPI service layer** – routes for recommendations, experiments, batch training, carts/orders, and user management (`api/routes/`).
 - **Experiment manager** – asynchronous orchestration that spins up experiments, records user sessions, and computes rich metrics (`api/services/experiment_service.py`).
 - **Analytics dashboard** – Streamlit UI (`unified_dashboard.py`) for launching comparisons and inspecting conversion funnels, reward distributions, session metrics, and learning curves.
@@ -43,7 +43,6 @@ All agents live in `src/agents/` and are instantiated via `src/agents/factory.py
 | **Deep Q-Network (DQN)** | `src/agents/dqn.py` | Torch-based network with replay buffer, target network sync, epsilon decay. Input dimension equals environment state; output dimension equals catalog size (actions). |
 | **LinUCB** | `src/agents/linucb.py` | Contextual bandit estimator with per-action covariance matrices; supports dynamic exploration via alpha parameter. |
 | **Epsilon-Greedy** | `src/agents/epsilon_greedy.py` | Lightweight bandit maintaining running averages; decays epsilon, making it useful as a fast baseline. |
-| **Random Baseline** | `src/agents/random_agent.py` | Uniform sampling to gauge uplift over pure chance. |
 
 During experiments, the global learning manager (`api/core/learning_manager.py`) initialises the catalog, simulator, and default DQN agent, then exposes:
 

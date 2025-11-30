@@ -29,7 +29,7 @@ async def start_experiment(
     - **n_users**: Number of users to create (10-1000)
     - **actions_per_user**: Actions per user (1-100)
     - **simulation_speed**: Speed multiplier (0.1-10.0)
-    - **agent_type**: ML agent type (dqn, epsilon_greedy, linucb, random)
+    - **agent_type**: ML agent type (dqn, epsilon_greedy, linucb)
 
     Returns experiment ID and estimated duration.
     """
@@ -228,7 +228,7 @@ async def get_agent_comparison_templates():
     Get pre-configured templates for comparing different agents.
 
     Returns configurations for testing all agent types:
-    - DQN, Epsilon-Greedy, LinUCB, Random
+    - DQN, Epsilon-Greedy, LinUCB
     - Same parameters for fair comparison
     """
     base_config = {
@@ -239,7 +239,7 @@ async def get_agent_comparison_templates():
         "simulation_speed": 3.0
     }
 
-    agents = ["dqn", "epsilon_greedy", "linucb", "random"]
+    agents = ["dqn", "epsilon_greedy", "linucb"]
     templates = []
 
     for agent in agents:
