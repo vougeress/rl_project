@@ -1,2 +1,15 @@
 /venv
 .env
+# backend build + cache artifacts
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.log
+*.db
+*.sqlite3
+.mypy_cache/
+.pytest_cache/
+
+# frontend
+node_modules/
