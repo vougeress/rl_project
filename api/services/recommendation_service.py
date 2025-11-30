@@ -3,13 +3,13 @@ Recommendation service for handling product recommendations.
 """
 
 from typing import Any, List, Dict, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from api.core.learning_manager import learning_manager
 from api.models.schemas import ProductInfo, RecommendationsResponse
-from api.models.database_models import Product, UserAction
+from api.models.database_models import Product, UserAction, Experiment
 
 
 class RecommendationService:
@@ -129,9 +129,17 @@ class RecommendationService:
 
             actual_session_id = user_session.session_id
 
+            experiment_ref = None
+            if experiment_id:
+                exp_stmt = select(Experiment).where(Experiment.experiment_id == experiment_id)
+                exp_result = await db.execute(exp_stmt)
+                experiment_ref = exp_result.scalar_one_or_none()
+                if not experiment_ref:
+                    experiment_id = None
+
             reward = self._calculate_reward(action, product)
             
-            session_time = int((datetime.now() - user_session.start_time).total_seconds())
+            session_time = int((datetime.now(timezone.utc) - user_session.start_time).total_seconds())
 
             user_action = UserAction(
                 user_id=user_id,
@@ -141,7 +149,7 @@ class RecommendationService:
                 session_time=session_time,
                 session_id=actual_session_id,
                 experiment_id=experiment_id,
-                action_timestamp=datetime.now()
+                action_timestamp=datetime.now(timezone.utc)
             )
 
             db.add(user_action)
