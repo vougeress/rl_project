@@ -5,6 +5,8 @@ import { Home } from './components/home/Home';
 import { ProductDetail } from './components/product/ProductDetail';
 import { CartPage } from './components/cart/CartPage';
 import { Checkout } from './components/checkout/Checkout';
+import { apiService } from './services/api';
+import { UserRegistrationResponse } from './types';
 
 function App() {
   const [userId, setUserId] = useState<number | null>(null);
@@ -35,7 +37,31 @@ function App() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    const storedUser = localStorage.getItem('currentUser');
+    let parsedUser: UserRegistrationResponse | null = null;
+
+    if (storedUser) {
+      try {
+        parsedUser = JSON.parse(storedUser) as UserRegistrationResponse;
+      } catch (error) {
+        console.error('Failed to parse stored user during logout:', error);
+      }
+    }
+
+    if (parsedUser?.session_id) {
+      try {
+        await apiService.endSession(parsedUser.user_id, parsedUser.session_id);
+      } catch (error) {
+        console.error('Failed to end user session:', error);
+      }
+    }
+
+    const cacheUserId = parsedUser?.user_id ?? userId;
+    if (cacheUserId) {
+      sessionStorage.removeItem(`user_${cacheUserId}_recommendations`);
+    }
+
     setUserId(null);
     setUserName('');
     localStorage.removeItem('currentUser');

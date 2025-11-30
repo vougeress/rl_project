@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Product } from '../../types';
 import { apiService } from '../../services/api';
@@ -9,7 +9,7 @@ import './Home.css';
 interface HomeProps {
   userId: number;
   userName: string;
-  onLogout: () => void;
+  onLogout: () => Promise<void>;
 }
 
 export function Home({ userId, userName, onLogout }: HomeProps) {
@@ -20,11 +20,10 @@ export function Home({ userId, userName, onLogout }: HomeProps) {
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [cartCount, setCartCount] = useState(0);
   const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    loadProducts();
-    loadCartCount();
-  }, [userId]);
+  const recommendationCacheKey = useMemo(
+    () => `user_${userId}_recommendations`,
+    [userId]
+  );
 
   useEffect(() => {
     if (selectedCategory === 'all') {
@@ -34,22 +33,23 @@ export function Home({ userId, userName, onLogout }: HomeProps) {
     }
   }, [selectedCategory, products]);
 
-  const loadProducts = async () => {
+  const loadProducts = useCallback(async () => {
     setIsLoading(true);
     setError(null);
     try {
       const response = await apiService.getRecommendations(userId, 20);
       setProducts(response.products);
       setFilteredProducts(response.products);
+      sessionStorage.setItem(recommendationCacheKey, JSON.stringify(response.products));
     } catch (error) {
       console.error('Failed to load products:', error);
       setError(error instanceof Error ? error.message : 'Failed to load products');
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [userId, recommendationCacheKey]);
 
-  const loadCartCount = async () => {
+  const loadCartCount = useCallback(async () => {
     try {
       const cart = await apiService.getCart(userId);
       setCartCount(cart.total_quantity);
@@ -58,7 +58,27 @@ export function Home({ userId, userName, onLogout }: HomeProps) {
       setError(error instanceof Error ? error.message : 'Failed to load cart info');
       setCartCount(0);
     }
-  };
+  }, [userId]);
+
+  useEffect(() => {
+    const cached = sessionStorage.getItem(recommendationCacheKey);
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached) as Product[];
+        setProducts(parsed);
+        setFilteredProducts(parsed);
+        setIsLoading(false);
+      } catch (err) {
+        console.error('Failed to parse cached recommendations:', err);
+        sessionStorage.removeItem(recommendationCacheKey);
+        loadProducts();
+      }
+    } else {
+      loadProducts();
+    }
+
+    loadCartCount();
+  }, [userId, recommendationCacheKey, loadProducts, loadCartCount]);
 
   const handleProductClick = async (product: Product) => {
     // Track view action
@@ -80,6 +100,14 @@ export function Home({ userId, userName, onLogout }: HomeProps) {
     navigate('/cart');
   };
 
+  const handleLogoutClick = async () => {
+    try {
+      await onLogout();
+    } catch (err) {
+      console.error('Logout failed:', err);
+    }
+  };
+
   return (
     <div className="home-container">
       <header className="home-header">
@@ -95,7 +123,7 @@ export function Home({ userId, userName, onLogout }: HomeProps) {
               {cartCount > 0 && <span className="cart-badge">{cartCount}</span>}
             </button>
             
-            <button className="logout-button" onClick={onLogout}>
+            <button className="logout-button" onClick={handleLogoutClick}>
               <LogOut size={18} />
             </button>
           </div>

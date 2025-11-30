@@ -173,6 +173,10 @@ export const apiService = {
     return response;
   },
 
+  async endSession(userId: number, sessionId: string): Promise<void> {
+    await apiCall(`/user/${userId}/sessions/${sessionId}/end`, 'POST');
+  },
+
   async getUserInfo(userId: number): Promise<User> {
     try {
       return await apiCall<User>(`/user/${userId}`, 'GET');
